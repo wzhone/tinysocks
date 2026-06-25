@@ -30,6 +30,7 @@ where
         .await
         .inspect_err(|e| {
             stats.inc_connect_failures();
+            stats.record_error(format!("SOCKS connect {target} failed: {e}"));
             println!("connect target {} failed: {}", target, e);
         })
         .context("SocksError::ConnectionFailed")?;
@@ -42,7 +43,10 @@ where
     let (up, down) =
         copy_bidirectional_with_sizes(inbound, &mut outbound, TCP_COPY_BUFFER, TCP_COPY_BUFFER)
             .await
-            .inspect_err(|_| stats.inc_relay_failures())
+            .inspect_err(|err| {
+                stats.inc_relay_failures();
+                stats.record_error(format!("SOCKS TCP relay failed: {err}"));
+            })
             .context("Failed to proxy traffic")?;
     stats.add_tcp_bytes(up, down);
     Ok(())
@@ -98,7 +102,10 @@ where
             }
             received = udp.recv_from(&mut udp_buf) => {
                 let (len, source) = received
-                    .inspect_err(|_| stats.inc_relay_failures())
+                    .inspect_err(|err| {
+                        stats.inc_relay_failures();
+                        stats.record_error(format!("SOCKS UDP relay receive failed: {err}"));
+                    })
                     .context("SOCKS UDP relay receive failed")?;
 
                 // Before a valid client datagram arrives, only accept packets
@@ -136,7 +143,10 @@ where
                     let wrapped = encode_udp_datagram(&Address::from_socket_addr(source), &udp_buf[..len])?;
                     udp.send_to(&wrapped, client)
                         .await
-                        .inspect_err(|_| stats.inc_relay_failures())
+                        .inspect_err(|err| {
+                            stats.inc_relay_failures();
+                            stats.record_error(format!("SOCKS UDP relay response send failed: {err}"));
+                        })
                         .context("SOCKS UDP relay response send failed")?;
                 }
             }
@@ -169,6 +179,7 @@ async fn handle_client_udp_packet(
     let target = match datagram.destination.resolve_socket_addr().await {
         Ok(target) => target,
         Err(err) => {
+            stats.record_error(format!("SOCKS UDP target resolution failed: {err}"));
             println!("SOCKS UDP target resolution failed: {err}");
             return Ok(());
         }
@@ -184,6 +195,7 @@ async fn handle_client_udp_packet(
         .context("SOCKS UDP relay request send failed")
     {
         stats.inc_relay_failures();
+        stats.record_error(format!("SOCKS UDP relay request send failed: {err}"));
         println!("{err}");
         return Ok(());
     }

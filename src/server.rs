@@ -77,6 +77,8 @@ impl ProxyServer {
 
             let Ok(permit) = limiter.clone().try_acquire_owned() else {
                 self.stats.inc_connection_limit_rejections();
+                self.stats
+                    .record_error(format!("connection limit rejected from {peer}"));
                 // Connection limit reached – cleanly close the accepted socket
                 // so the client sees EOF rather than a spurious RST.
                 let _ = stream.shutdown().await;
@@ -136,6 +138,9 @@ impl ProxyServer {
                             if let Err(err) = handshake(&mut stream, method).await {
                                 if !bypass_auth {
                                     stats.inc_auth_failures();
+                                    stats.record_error(format!(
+                                        "SOCKS authentication negotiation failed from {peer}: {err}"
+                                    ));
                                 }
                                 return Err(err);
                             }
@@ -144,6 +149,9 @@ impl ProxyServer {
                                 && let Err(err) = basic_authenticate(&mut stream, &auth_cfg).await
                             {
                                 stats.inc_auth_failures();
+                                stats.record_error(format!(
+                                    "SOCKS authentication failed from {peer}: {err}"
+                                ));
                                 return Err(err);
                             }
                             let req = read_request(&mut stream).await?;

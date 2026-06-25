@@ -1,11 +1,16 @@
 //! Connection and traffic statistics for the proxy.
 //!
-//! All counters use atomic operations so the struct can be shared across
-//! spawned tasks without locks. The `Stats` handle is cheap to clone.
+//! Most counters use atomic operations so the struct can be shared across
+//! spawned tasks without locks. Recent errors use a small mutex-protected
+//! ring buffer because writes only happen on failure paths.
 
-use std::sync::Arc;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+const MAX_RECENT_ERRORS: usize = 100;
+const MAX_ERROR_MESSAGE_CHARS: usize = 240;
 
 /// A cheaply-cloneable handle to the proxy-wide statistics.
 #[derive(Clone, Default)]
@@ -33,6 +38,12 @@ struct StatsInner {
     connect_failures: AtomicU64,
     auth_failures: AtomicU64,
     relay_failures: AtomicU64,
+    recent_errors: Mutex<VecDeque<RecentError>>,
+}
+
+struct RecentError {
+    unix_seconds: u64,
+    message: String,
 }
 
 impl Default for StatsInner {
@@ -52,6 +63,7 @@ impl Default for StatsInner {
             connect_failures: AtomicU64::default(),
             auth_failures: AtomicU64::default(),
             relay_failures: AtomicU64::default(),
+            recent_errors: Mutex::new(VecDeque::with_capacity(MAX_RECENT_ERRORS)),
         }
     }
 }
@@ -117,6 +129,7 @@ impl Stats {
                 ("{connect_failures}", snapshot.connect_failures.to_string()),
                 ("{auth_failures}", snapshot.auth_failures.to_string()),
                 ("{relay_failures}", snapshot.relay_failures.to_string()),
+                ("{recent_errors}", self.render_recent_errors()),
             ],
         )
     }
@@ -217,6 +230,51 @@ impl Stats {
     pub fn inc_relay_failures(&self) {
         self.0.relay_failures.fetch_add(1, Ordering::Relaxed);
     }
+
+    /// Record one recent error message for display on the stats page.
+    pub fn record_error(&self, message: impl Into<String>) {
+        let unix_seconds = current_unix_seconds();
+        let message = truncate_error_message(&normalize_error_message(&message.into()));
+        let error = RecentError {
+            unix_seconds,
+            message,
+        };
+
+        let mut errors = self
+            .0
+            .recent_errors
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if errors.len() == MAX_RECENT_ERRORS {
+            errors.pop_front();
+        }
+        errors.push_back(error);
+    }
+
+    /// Render recent errors as table rows.
+    fn render_recent_errors(&self) -> String {
+        let errors = self
+            .0
+            .recent_errors
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        if errors.is_empty() {
+            return "<tr><td class=\"empty-value\">No recent errors</td></tr>".to_string();
+        }
+
+        errors
+            .iter()
+            .rev()
+            .map(|error| {
+                format!(
+                    "<tr><td class=\"error-message\"><time class=\"error-time\" data-unix-seconds=\"{}\"></time>{}</td></tr>",
+                    error.unix_seconds,
+                    escape_html(&error.message)
+                )
+            })
+            .collect()
+    }
 }
 
 /// Replace stats placeholders in a static HTML template.
@@ -251,6 +309,50 @@ fn format_duration(seconds: u64) -> String {
     } else {
         format!("{seconds}s")
     }
+}
+
+/// Return the current Unix timestamp in seconds.
+fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+/// Collapse control whitespace so recent error rows stay one line per event.
+fn normalize_error_message(message: &str) -> String {
+    message.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Limit one recent error entry to a bounded display size.
+fn truncate_error_message(message: &str) -> String {
+    if message.len() <= MAX_ERROR_MESSAGE_CHARS {
+        return message.to_string();
+    }
+
+    if let Some((end, _)) = message.char_indices().nth(MAX_ERROR_MESSAGE_CHARS) {
+        let mut truncated = String::with_capacity(end + 3);
+        truncated.push_str(&message[..end]);
+        truncated.push_str("...");
+        return truncated;
+    }
+
+    message.to_string()
+}
+
+/// Escape text before embedding it into the stats HTML.
+fn escape_html(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 #[cfg(test)]
@@ -388,6 +490,26 @@ mod tests {
     }
 
     #[test]
+    fn truncate_error_message_keeps_short_messages() {
+        assert_eq!(truncate_error_message("short error"), "short error");
+    }
+
+    #[test]
+    fn truncate_error_message_counts_chars_not_bytes() {
+        let message = "错".repeat(MAX_ERROR_MESSAGE_CHARS);
+        assert_eq!(truncate_error_message(&message), message);
+    }
+
+    #[test]
+    fn truncate_error_message_truncates_at_char_boundary() {
+        let message = format!("{}tail", "错".repeat(MAX_ERROR_MESSAGE_CHARS));
+        assert_eq!(
+            truncate_error_message(&message),
+            format!("{}...", "错".repeat(MAX_ERROR_MESSAGE_CHARS))
+        );
+    }
+
+    #[test]
     fn render_template_replaces_all_placeholders() {
         let tmpl = "before {a} middle {b} after";
         let result = render_template(tmpl, &[("{a}", "1".into()), ("{b}", "hello".into())]);
@@ -427,6 +549,7 @@ mod tests {
         assert!(!html.contains("{connect_failures}"));
         assert!(!html.contains("{auth_failures}"));
         assert!(!html.contains("{relay_failures}"));
+        assert!(!html.contains("{recent_errors}"));
     }
 
     #[test]
@@ -440,5 +563,32 @@ mod tests {
         assert!(html.contains(">2<"), "total_connections value");
         assert!(html.contains(">1<"), "http_connections value");
         assert!(html.contains(">0<"), "HTTP connections should be 0");
+    }
+
+    #[test]
+    fn recent_errors_render_newest_first_and_escape_html() {
+        let stats = Stats::default();
+        stats.record_error("first error");
+        stats.record_error("relay <bad> & \"quoted\"");
+
+        let html = stats.render_html();
+        let newest = html.find("relay &lt;bad&gt; &amp; &quot;quoted&quot;");
+        let oldest = html.find("first error");
+
+        assert!(newest.is_some(), "escaped newest error should render");
+        assert!(oldest.is_some(), "oldest error should render");
+        assert!(newest < oldest, "newest errors render first");
+    }
+
+    #[test]
+    fn recent_errors_are_bounded() {
+        let stats = Stats::default();
+        for i in 0..(MAX_RECENT_ERRORS + 1) {
+            stats.record_error(format!("error {i}"));
+        }
+
+        let html = stats.render_html();
+        assert!(!html.contains("error 0"));
+        assert!(html.contains("error 100"));
     }
 }

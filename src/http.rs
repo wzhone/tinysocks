@@ -42,6 +42,7 @@ pub async fn handle_http_proxy(
     if is_stats_request(&req, listener_port) {
         if !bypass_auth && !stats_authorized(&req, auth) {
             stats.inc_auth_failures();
+            stats.record_error("stats page authentication failed");
             send_stats_auth_required(stream).await?;
             return Ok(());
         }
@@ -51,6 +52,7 @@ pub async fn handle_http_proxy(
     if !bypass_auth && !http_basic_authorized(get_header(&req.headers, "proxy-authorization"), auth)
     {
         stats.inc_auth_failures();
+        stats.record_error("HTTP proxy authentication failed");
         send_proxy_auth_required(stream).await?;
         return Ok(());
     }
@@ -266,8 +268,9 @@ async fn handle_connect(
     let target = format_target_endpoint(&host, port);
     let mut outbound = TcpStream::connect(&target)
         .await
-        .inspect_err(|_| {
+        .inspect_err(|err| {
             stats.inc_connect_failures();
+            stats.record_error(format!("HTTP CONNECT {target} failed: {err}"));
         })
         .context("HttpError::ConnectFailed")?;
     let _ = outbound.set_nodelay(true);
@@ -294,7 +297,10 @@ async fn handle_connect(
     let (up, down) =
         copy_bidirectional_with_sizes(stream, &mut outbound, copy_buf_size, copy_buf_size)
             .await
-            .inspect_err(|_| stats.inc_relay_failures())
+            .inspect_err(|err| {
+                stats.inc_relay_failures();
+                stats.record_error(format!("HTTP CONNECT relay failed for {target}: {err}"));
+            })
             .context("HttpError::RelayFailed")?;
     stats.add_tcp_bytes(up, down);
     Ok(())
@@ -313,8 +319,9 @@ async fn handle_forward(
     let target = format_target_endpoint(&host, port);
     let mut outbound = TcpStream::connect(&target)
         .await
-        .inspect_err(|_| {
+        .inspect_err(|err| {
             stats.inc_connect_failures();
+            stats.record_error(format!("HTTP forward connect {target} failed: {err}"));
         })
         .context("HttpError::ConnectFailed")?;
     let _ = outbound.set_nodelay(true);
@@ -359,7 +366,10 @@ async fn handle_forward(
     let (up, down) =
         copy_bidirectional_with_sizes(stream, &mut outbound, copy_buf_size, copy_buf_size)
             .await
-            .inspect_err(|_| stats.inc_relay_failures())
+            .inspect_err(|err| {
+                stats.inc_relay_failures();
+                stats.record_error(format!("HTTP forward relay failed for {target}: {err}"));
+            })
             .context("HttpError::RelayFailed")?;
     stats.add_tcp_bytes(up, down);
 

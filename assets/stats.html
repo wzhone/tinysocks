@@ -126,6 +126,34 @@
             color: var(--error-color) !important;
         }
 
+        .wide {
+            grid-column: 1 / -1;
+        }
+
+        .error-message,
+        .empty-value {
+            text-align: left;
+            white-space: normal;
+        }
+
+        .error-message {
+            font-weight: 400;
+            color: var(--value-color);
+        }
+
+        .error-time {
+            display: inline-block;
+            min-width: 150px;
+            margin-right: 10px;
+            color: var(--muted);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .empty-value {
+            font-weight: 400;
+            color: var(--muted);
+        }
+
         @media(max-width: 768px) {
             .grid {
                 grid-template-columns: 1fr;
@@ -229,8 +257,37 @@
                     </tr>
                 </table>
             </section>
+
+            <section class="wide">
+                <h2>Recent Errors</h2>
+                <table>
+                    {recent_errors}
+                </table>
+            </section>
         </div>
     </main>
+    <script>
+        const errorTimeFormatter = new Intl.DateTimeFormat(undefined, {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hourCycle: "h23"
+        });
+
+        document.querySelectorAll("[data-unix-seconds]").forEach((node) => {
+            const seconds = Number(node.dataset.unixSeconds);
+            if (!Number.isFinite(seconds)) {
+                return;
+            }
+
+            const date = new Date(seconds * 1000);
+            node.setAttribute("datetime", date.toISOString());
+            node.textContent = errorTimeFormatter.format(date);
+        });
+    </script>
 </body>
 
 </html>
