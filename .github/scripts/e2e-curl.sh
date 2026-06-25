@@ -119,14 +119,13 @@ TINYSOCKS_USERNAME="ci-user" \
 TINYSOCKS_PASSWORD="ci-pass" \
 TINYSOCKS_MAX_CONNECTIONS=128 \
 TINYSOCKS_BYPASS_IP="192.0.2.1/32" \
-"$TINYSOCKS_BIN" run \
+"$TINYSOCKS_BIN" \
   >"$TMP_DIR/proxy-auth.log" 2>&1 &
 PIDS+=("$!")
 
 "$TINYSOCKS_BIN" \
   "127.0.0.1:$ALLOW_PROXY_PORT" \
   --bypass-ip "127.0.0.0/8,::1/128" \
-  run \
   >"$TMP_DIR/proxy-allowlist.log" 2>&1 &
 PIDS+=("$!")
 
