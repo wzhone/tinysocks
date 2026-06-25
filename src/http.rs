@@ -41,6 +41,7 @@ pub async fn handle_http_proxy(
 
     if is_stats_request(&req, listener_port) {
         if !bypass_auth && !stats_authorized(&req, auth) {
+            stats.inc_auth_failures();
             send_stats_auth_required(stream).await?;
             return Ok(());
         }
@@ -49,6 +50,7 @@ pub async fn handle_http_proxy(
 
     if !bypass_auth && !http_basic_authorized(get_header(&req.headers, "proxy-authorization"), auth)
     {
+        stats.inc_auth_failures();
         send_proxy_auth_required(stream).await?;
         return Ok(());
     }
@@ -292,6 +294,7 @@ async fn handle_connect(
     let (up, down) =
         copy_bidirectional_with_sizes(stream, &mut outbound, copy_buf_size, copy_buf_size)
             .await
+            .inspect_err(|_| stats.inc_relay_failures())
             .context("HttpError::RelayFailed")?;
     stats.add_tcp_bytes(up, down);
     Ok(())
@@ -356,6 +359,7 @@ async fn handle_forward(
     let (up, down) =
         copy_bidirectional_with_sizes(stream, &mut outbound, copy_buf_size, copy_buf_size)
             .await
+            .inspect_err(|_| stats.inc_relay_failures())
             .context("HttpError::RelayFailed")?;
     stats.add_tcp_bytes(up, down);
 

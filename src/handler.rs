@@ -42,6 +42,7 @@ where
     let (up, down) =
         copy_bidirectional_with_sizes(inbound, &mut outbound, TCP_COPY_BUFFER, TCP_COPY_BUFFER)
             .await
+            .inspect_err(|_| stats.inc_relay_failures())
             .context("Failed to proxy traffic")?;
     stats.add_tcp_bytes(up, down);
     Ok(())
@@ -96,7 +97,9 @@ where
                 bail!("SocksError::UnexpectedTcpDataDuringUdpAssociate");
             }
             received = udp.recv_from(&mut udp_buf) => {
-                let (len, source) = received.context("SOCKS UDP relay receive failed")?;
+                let (len, source) = received
+                    .inspect_err(|_| stats.inc_relay_failures())
+                    .context("SOCKS UDP relay receive failed")?;
 
                 // Before a valid client datagram arrives, only accept packets
                 // from the same IP that owns the TCP control connection.
@@ -129,11 +132,11 @@ where
                 {
                     // Only forward replies from destinations that the locked
                     // client has contacted through this relay.
-                    stats.inc_udp_datagrams_in();
                     stats.add_udp_bytes_in(len as u64);
                     let wrapped = encode_udp_datagram(&Address::from_socket_addr(source), &udp_buf[..len])?;
                     udp.send_to(&wrapped, client)
                         .await
+                        .inspect_err(|_| stats.inc_relay_failures())
                         .context("SOCKS UDP relay response send failed")?;
                 }
             }
@@ -180,10 +183,10 @@ async fn handle_client_udp_packet(
         .await
         .context("SOCKS UDP relay request send failed")
     {
+        stats.inc_relay_failures();
         println!("{err}");
         return Ok(());
     }
-    stats.inc_udp_datagrams_out();
     stats.add_udp_bytes_out(datagram.payload.len() as u64);
     Ok(())
 }
@@ -225,7 +228,6 @@ mod tests {
         .unwrap();
 
         let snap = stats.snapshot();
-        assert_eq!(snap.udp_datagrams_out, 1);
         assert_eq!(snap.udp_bytes_out, 5);
     }
 
@@ -251,7 +253,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(stats.snapshot().udp_datagrams_out, 0);
+        assert_eq!(stats.snapshot().udp_bytes_out, 0);
     }
 
     #[tokio::test]
@@ -281,7 +283,7 @@ mod tests {
 
         assert_eq!(client_addr, Some(source));
         assert!(allowed.is_empty());
-        assert_eq!(stats.snapshot().udp_datagrams_out, 0);
+        assert_eq!(stats.snapshot().udp_bytes_out, 0);
     }
 
     #[tokio::test]
@@ -373,9 +375,9 @@ mod tests {
             "no new endpoint added"
         );
         assert_eq!(
-            stats.snapshot().udp_datagrams_out,
-            snap_before.udp_datagrams_out,
-            "no extra datagram sent"
+            stats.snapshot().udp_bytes_out,
+            snap_before.udp_bytes_out,
+            "no extra UDP bytes sent"
         );
     }
 }

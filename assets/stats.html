@@ -145,7 +145,11 @@
                 <h2>Connections</h2>
                 <table>
                     <tr>
-                        <th>Total connections</th>
+                        <th>Uptime</th>
+                        <td>{uptime}</td>
+                    </tr>
+                    <tr>
+                        <th>Accepted connections</th>
                         <td>{total_connections}</td>
                     </tr>
                     <tr>
@@ -160,18 +164,26 @@
                         <th>HTTP connections</th>
                         <td>{http_connections}</td>
                     </tr>
+                    <tr>
+                        <th>Connection limit rejections</th>
+                        <td>{connection_limit_rejections}</td>
+                    </tr>
                 </table>
             </section>
 
             <section>
-                <h2>TCP Traffic</h2>
+                <h2>Traffic</h2>
                 <table>
                     <tr>
-                        <th>Client to remote</th>
+                        <th>Total traffic</th>
+                        <td>{total_traffic}</td>
+                    </tr>
+                    <tr>
+                        <th>TCP client to remote</th>
                         <td>{tcp_up}</td>
                     </tr>
                     <tr>
-                        <th>Remote to client</th>
+                        <th>TCP remote to client</th>
                         <td>{tcp_down}</td>
                     </tr>
                 </table>
@@ -183,14 +195,6 @@
                     <tr>
                         <th>UDP associate sessions</th>
                         <td>{udp_associate_sessions}</td>
-                    </tr>
-                    <tr>
-                        <th>Client to remote datagrams</th>
-                        <td>{udp_datagrams_out}</td>
-                    </tr>
-                    <tr>
-                        <th>Remote to client datagrams</th>
-                        <td>{udp_datagrams_in}</td>
                     </tr>
                     <tr>
                         <th>Client to remote bytes</th>
@@ -207,8 +211,16 @@
                 <h2>Errors</h2>
                 <table>
                     <tr>
-                        <th>Connect failures</th>
+                        <th>Authentication failures</th>
+                        <td class="error-value">{auth_failures}</td>
+                    </tr>
+                    <tr>
+                        <th>Outbound connect failures</th>
                         <td class="error-value">{connect_failures}</td>
+                    </tr>
+                    <tr>
+                        <th>Relay failures</th>
+                        <td class="error-value">{relay_failures}</td>
                     </tr>
                 </table>
             </section>
