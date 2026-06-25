@@ -140,11 +140,11 @@ impl ProxyServer {
                                 return Err(err);
                             }
 
-                            if !bypass_auth {
-                                if let Err(err) = basic_authenticate(&mut stream, &auth_cfg).await {
-                                    stats.inc_auth_failures();
-                                    return Err(err);
-                                }
+                            if !bypass_auth
+                                && let Err(err) = basic_authenticate(&mut stream, &auth_cfg).await
+                            {
+                                stats.inc_auth_failures();
+                                return Err(err);
                             }
                             let req = read_request(&mut stream).await?;
 
