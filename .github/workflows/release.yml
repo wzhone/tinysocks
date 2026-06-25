@@ -1,0 +1,193 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: "1.96"
+  UPX_VERSION: "5.2.0"
+
+jobs:
+  linux:
+    name: Build Linux image and asset
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: cargo test
+        run: cargo +${{ env.RUST_VERSION }} test --all --locked
+
+      - name: Build release binary
+        env:
+          TINYSOCKS_VERSION: ${{ github.ref_name }}
+        run: cargo +${{ env.RUST_VERSION }} build --release --locked
+
+      - name: Compress binary with UPX
+        uses: crazy-max/ghaction-upx@v4
+        with:
+          version: v${{ env.UPX_VERSION }}
+          files: |
+            target/release/tinysocks
+          args: --best --lzma
+
+      - name: Package Linux asset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          asset="tinysocks-${GITHUB_REF_NAME}-linux-x86_64"
+          staging="dist/${asset}"
+
+          mkdir -p "$staging"
+          cp target/release/tinysocks "$staging/"
+
+          tar -C dist -czf "dist/${asset}.tar.gz" "$asset"
+
+          cd dist
+          sha256sum "${asset}.tar.gz" > "${asset}.tar.gz.sha256"
+
+      - name: Prepare image name
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract container metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Prepare Docker context
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist/docker-context
+          cp target/release/tinysocks dist/docker-context/tinysocks
+          cp Dockerfile dist/docker-context/Dockerfile
+          chmod 755 dist/docker-context/tinysocks
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v7
+        with:
+          context: dist/docker-context
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Upload release asset artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-x86_64
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+  windows:
+    name: Build windows-x86_64
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build release binary
+        env:
+          TINYSOCKS_VERSION: ${{ github.ref_name }}
+        run: cargo +${{ env.RUST_VERSION }} build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Compress binary with UPX
+        uses: crazy-max/ghaction-upx@v4
+        with:
+          version: v${{ env.UPX_VERSION }}
+          files: |
+            target/x86_64-pc-windows-msvc/release/tinysocks.exe
+          args: --best --lzma
+
+      - name: Package Windows asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $asset = "tinysocks-$env:GITHUB_REF_NAME-windows-x86_64"
+          $staging = Join-Path "dist" $asset
+
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item "target\x86_64-pc-windows-msvc\release\tinysocks.exe" $staging
+
+          Push-Location dist
+          Compress-Archive -Path $asset -DestinationPath "$asset.zip"
+
+          $hash = (Get-FileHash "$asset.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $asset.zip" | Out-File -FilePath "$asset.zip.sha256" -Encoding ascii
+          Pop-Location
+
+      - name: Upload release asset artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-x86_64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      - linux
+      - windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

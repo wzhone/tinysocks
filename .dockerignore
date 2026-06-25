@@ -1,0 +1,3 @@
+# The Dockerfile expects a prebuilt ./tinysocks binary in the build context.
+*
+!tinysocks

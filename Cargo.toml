@@ -1,0 +1,30 @@
+[package]
+name = "tinysocks"
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+description = "A single-port SOCKS5 and HTTP proxy server with authentication, IP allowlists, IPv4/IPv6 support, and UDP ASSOCIATE support."
+repository = "https://github.com/wzhone/tinysocks"
+homepage = "https://github.com/wzhone/tinysocks"
+readme = "README.md"
+rust-version = "1.96"
+
+[dependencies]
+anyhow = "1.0"
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+clap = { version = "4.5", default-features = false, features = ["derive", "env", "error-context", "help", "std", "usage"] }
+http = "1.4"
+httparse = { version = "1.10", default-features = false }
+ipnet = { version = "2.10", default-features = false }
+subtle = { version = "2.6", default-features = false }
+tokio = { version = "1.48", default-features = false, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

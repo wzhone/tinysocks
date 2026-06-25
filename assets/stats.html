@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Proxy Statistics</title>
+    <style>
+        :root {
+            font-family: "Comic Sans MS", "Arial";
+            color-scheme: light dark;
+            --bg: #f4f4f5;
+            --fg: #27272a;
+            --muted: #71717a;
+            --border: #e4e4e7;
+            --head-bg: #fafafa;
+            --value-color: #27272a;
+            --error-color: #dc2626;
+            --card-radius: 6px;
+        }
+
+        @media(prefers-color-scheme: dark) {
+            :root {
+                --bg: #18181b;
+                --fg: #d4d4d8;
+                --muted: #a1a1aa;
+                --border: #27272a;
+                --head-bg: #202023;
+                --value-color: #e4e4e7;
+                --error-color: #ef4444;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 32px 24px;
+            background-color: var(--bg);
+            color: var(--fg);
+        }
+
+        main {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 28px;
+            border-bottom: 2px solid var(--fg);
+            padding-bottom: 16px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 20px;
+        }
+
+        section {
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            overflow: hidden;
+        }
+
+        h2 {
+            margin: 0;
+            padding: 10px 14px;
+            background: var(--head-bg);
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        tr:last-child th,
+        tr:last-child td {
+            border-bottom: 0;
+        }
+
+        th {
+            text-align: left;
+            font-weight: 400;
+            color: var(--muted);
+        }
+
+        td {
+            text-align: right;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            color: var(--value-color);
+            white-space: nowrap;
+        }
+
+        .error-value {
+            color: var(--error-color) !important;
+        }
+
+        @media(max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+
+            body {
+                padding: 20px 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <header>
+            <h1>Proxy Statistics</h1>
+        </header>
+
+        <div class="grid">
+            <section>
+                <h2>Connections</h2>
+                <table>
+                    <tr>
+                        <th>Total connections</th>
+                        <td>{total_connections}</td>
+                    </tr>
+                    <tr>
+                        <th>Active connections</th>
+                        <td>{active_connections}</td>
+                    </tr>
+                    <tr>
+                        <th>SOCKS5 connections</th>
+                        <td>{socks5_connections}</td>
+                    </tr>
+                    <tr>
+                        <th>HTTP connections</th>
+                        <td>{http_connections}</td>
+                    </tr>
+                </table>
+            </section>
+
+            <section>
+                <h2>TCP Traffic</h2>
+                <table>
+                    <tr>
+                        <th>Client to remote</th>
+                        <td>{tcp_up}</td>
+                    </tr>
+                    <tr>
+                        <th>Remote to client</th>
+                        <td>{tcp_down}</td>
+                    </tr>
+                </table>
+            </section>
+
+            <section>
+                <h2>UDP Traffic</h2>
+                <table>
+                    <tr>
+                        <th>UDP associate sessions</th>
+                        <td>{udp_associate_sessions}</td>
+                    </tr>
+                    <tr>
+                        <th>Client to remote datagrams</th>
+                        <td>{udp_datagrams_out}</td>
+                    </tr>
+                    <tr>
+                        <th>Remote to client datagrams</th>
+                        <td>{udp_datagrams_in}</td>
+                    </tr>
+                    <tr>
+                        <th>Client to remote bytes</th>
+                        <td>{udp_bytes_out}</td>
+                    </tr>
+                    <tr>
+                        <th>Remote to client bytes</th>
+                        <td>{udp_bytes_in}</td>
+                    </tr>
+                </table>
+            </section>
+
+            <section>
+                <h2>Errors</h2>
+                <table>
+                    <tr>
+                        <th>Connect failures</th>
+                        <td class="error-value">{connect_failures}</td>
+                    </tr>
+                </table>
+            </section>
+        </div>
+    </main>
+</body>
+
+</html>
