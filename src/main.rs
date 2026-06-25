@@ -11,13 +11,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let runtime_options = cli.runtime_options();
 
-    if cli.run_service {
-        return service::run_as_service(runtime_options);
-    }
-
-    match cli.command.unwrap_or(Command::Run) {
-        Command::Run => service::run_foreground(runtime_options).await,
-        Command::Install => service::install(&runtime_options),
-        Command::Uninstall => service::uninstall(),
+    match cli.command {
+        Some(Command::Install) => service::install(&runtime_options),
+        Some(Command::Uninstall) => service::uninstall(),
+        Some(Command::Winsvc) => service::run_as_service(runtime_options),
+        None => service::run_foreground(runtime_options).await,
     }
 }

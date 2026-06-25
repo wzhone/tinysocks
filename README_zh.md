@@ -47,7 +47,7 @@ cargo build --release --locked
 
 ### Docker
 
-容器默认执行 `tinysocks run`，并监听 `0.0.0.0:1080`。运行参数可通过环境变量设置，也可以在镜像名后追加 CLI 参数覆盖。
+容器默认执行 `tinysocks`，并监听 `0.0.0.0:1080`。运行参数可通过环境变量设置，也可以在镜像名后追加 CLI 参数覆盖。
 
 SOCKS5 UDP ASSOCIATE 会为每个会话使用临时 UDP 中继端口。通过 Docker 使用 UDP ASSOCIATE 时，请使用 host network。
 
@@ -56,8 +56,7 @@ SOCKS5 UDP ASSOCIATE 会为每个会话使用临时 UDP 中继端口。通过 Do
 ```bash
 tinysocks 127.0.0.1:1080 \
   --username admin \
-  --password change-me \
-  run
+  --password change-me
 ```
 
 客户端可以用 SOCKS5 或 HTTP 协议连接同一个地址和端口。
@@ -80,7 +79,7 @@ CLI 参数优先于环境变量。必须配置用户名/密码，或至少配置
 
 ## 服务安装
 
-`install` 和 `uninstall` 用于宿主机服务管理。
+`install` 和 `uninstall` 用于宿主机服务管理。Linux systemd 服务名为 `tinysocks`；Windows 服务名为 `TinySocks`。
 
 ### Linux systemd
 

@@ -59,9 +59,6 @@ pub struct Cli {
     )]
     bypass_ips: Vec<String>,
 
-    #[arg(long, hide = true)]
-    pub run_service: bool,
-
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -81,9 +78,10 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Run,
     Install,
     Uninstall,
+    #[command(name = "winsvc", hide = true)]
+    Winsvc,
 }
 
 #[cfg(test)]
@@ -100,7 +98,6 @@ mod tests {
             "secret",
             "--bypass-ip",
             "127.0.0.1,192.168.1.1",
-            "run",
         ])
         .expect("should parse CLI");
 
@@ -121,17 +118,15 @@ mod tests {
                 "127.0.0.1",
                 "--bypass-ip",
                 "192.168.1.1",
-                "run",
             ])
             .is_err()
         );
     }
 
     #[test]
-    fn run_accepts_bind_after_subcommand() {
+    fn default_run_accepts_bind_without_subcommand() {
         let cli = Cli::try_parse_from([
             "tinysocks",
-            "run",
             "127.0.0.1:2080",
             "--username",
             "admin",
@@ -142,11 +137,11 @@ mod tests {
 
         let options = cli.runtime_options();
         assert_eq!(options.bind, "127.0.0.1:2080");
-        assert!(matches!(cli.command, Some(Command::Run)));
+        assert!(cli.command.is_none());
     }
 
     #[test]
-    fn run_accepts_command_after_global_options() {
+    fn install_accepts_command_after_global_options() {
         let cli = Cli::try_parse_from([
             "tinysocks",
             "127.0.0.1:2081",
@@ -154,13 +149,31 @@ mod tests {
             "admin",
             "--password",
             "secret",
-            "run",
+            "install",
         ])
         .expect("should parse CLI");
 
         let options = cli.runtime_options();
         assert_eq!(options.bind, "127.0.0.1:2081");
-        assert!(matches!(cli.command, Some(Command::Run)));
+        assert!(matches!(cli.command, Some(Command::Install)));
+    }
+
+    #[test]
+    fn winsvc_accepts_bind_after_hidden_subcommand() {
+        let cli = Cli::try_parse_from([
+            "tinysocks",
+            "winsvc",
+            "127.0.0.1:2082",
+            "--username",
+            "admin",
+            "--password",
+            "secret",
+        ])
+        .expect("should parse CLI");
+
+        let options = cli.runtime_options();
+        assert_eq!(options.bind, "127.0.0.1:2082");
+        assert!(matches!(cli.command, Some(Command::Winsvc)));
     }
 
     #[test]

@@ -9,12 +9,13 @@ use tinysocks::{
     server::ProxyServer,
 };
 
-use super::{DEFAULT_SERVICE_NAME, SERVICE_DESCRIPTION, windows_service_args};
+use super::{SERVICE_DESCRIPTION, windows_service_args};
 
 static SERVICE_NAME: OnceLock<String> = OnceLock::new();
 static SERVICE_OPTIONS: OnceLock<RuntimeOptions> = OnceLock::new();
 
-const DEFAULT_WINDOWS_APP_DIR_NAME: &str = "tinysocks";
+const WINDOWS_SERVICE_NAME: &str = "TinySocks";
+const DEFAULT_WINDOWS_APP_DIR_NAME: &str = "TinySocks";
 
 /// Return the Windows install directory for the service binary.
 fn install_dir() -> PathBuf {
@@ -38,7 +39,7 @@ pub(crate) fn install(options: &RuntimeOptions) -> Result<()> {
         service_manager::{ServiceManager, ServiceManagerAccess},
     };
 
-    let service_name = DEFAULT_SERVICE_NAME;
+    let service_name = WINDOWS_SERVICE_NAME;
     let installed_exe = installed_exe_path(service_name);
     let current_exe = std::env::current_exe().context("Failed to locate current executable")?;
 
@@ -115,7 +116,7 @@ pub(crate) fn uninstall() -> Result<()> {
         service_manager::{ServiceManager, ServiceManagerAccess},
     };
 
-    let service_name = DEFAULT_SERVICE_NAME;
+    let service_name = WINDOWS_SERVICE_NAME;
     let installed_exe = installed_exe_path(service_name);
     let installed_dir = installed_exe.parent().map(Path::to_path_buf);
 
@@ -193,7 +194,7 @@ fn remove_install_files(installed_exe: &Path, installed_dir: Option<&Path>) -> R
 pub(crate) fn run_as_service(options: RuntimeOptions) -> Result<()> {
     use windows_service::service_dispatcher;
 
-    let service_name = DEFAULT_SERVICE_NAME;
+    let service_name = WINDOWS_SERVICE_NAME;
     SERVICE_NAME
         .set(service_name.to_string())
         .map_err(|_| anyhow::anyhow!("service already initialized"))?;

@@ -10,4 +10,3 @@ COPY tinysocks /usr/local/bin/tinysocks
 EXPOSE 1080/tcp
 
 ENTRYPOINT ["/usr/local/bin/tinysocks"]
-CMD ["run"]

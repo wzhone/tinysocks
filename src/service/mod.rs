@@ -6,8 +6,7 @@ use tinysocks::{
     server::ProxyServer,
 };
 
-pub(crate) const DEFAULT_SERVICE_NAME: &str = "tinysocks";
-pub(crate) const SERVICE_DESCRIPTION: &str = "SOCKS5/HTTP tinysocks service";
+pub(crate) const SERVICE_DESCRIPTION: &str = "TinySocks SOCKS5/HTTP proxy service";
 
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
@@ -69,18 +68,10 @@ pub(crate) fn runtime_args(options: &RuntimeOptions) -> Result<Vec<String>> {
     Ok(args)
 }
 
-#[cfg(test)]
-/// Build the Linux foreground service command arguments.
-pub(crate) fn foreground_service_args(options: &RuntimeOptions) -> Result<Vec<String>> {
-    let mut args = vec!["run".to_string()];
-    args.extend(runtime_args(options)?);
-    Ok(args)
-}
-
 #[cfg(any(windows, test))]
 /// Build the Windows service command arguments.
 pub(crate) fn windows_service_args(options: &RuntimeOptions) -> Result<Vec<String>> {
-    let mut args = vec!["--run-service".to_string()];
+    let mut args = vec!["winsvc".to_string()];
     args.extend(runtime_args(options)?);
     Ok(args)
 }
@@ -100,34 +91,13 @@ mod tests {
     }
 
     #[test]
-    fn foreground_service_args_include_run_and_runtime_options() {
-        let args = foreground_service_args(&sample_options()).expect("should build args");
-
-        assert_eq!(
-            args,
-            vec![
-                "run",
-                "0.0.0.0:1080",
-                "--max-connections",
-                "2048",
-                "--username",
-                "admin",
-                "--password",
-                "secret",
-                "--bypass-ip",
-                "127.0.0.0/8,::1/128",
-            ]
-        );
-    }
-
-    #[test]
-    fn windows_service_args_include_run_service_and_runtime_options() {
+    fn windows_service_args_include_winsvc_and_runtime_options() {
         let args = windows_service_args(&sample_options()).expect("should build args");
 
         assert_eq!(
             args,
             vec![
-                "--run-service",
+                "winsvc",
                 "0.0.0.0:1080",
                 "--max-connections",
                 "2048",

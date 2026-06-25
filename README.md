@@ -47,7 +47,7 @@ Building from source requires Rust 1.96 or newer.
 
 ### Docker
 
-The container runs `tinysocks run` by default and listens on `0.0.0.0:1080`. Runtime options can be set with environment variables, or overridden by appending CLI arguments after the image name.
+The container runs `tinysocks` by default and listens on `0.0.0.0:1080`. Runtime options can be set with environment variables, or overridden by appending CLI arguments after the image name.
 
 SOCKS5 UDP ASSOCIATE uses an ephemeral UDP relay port per session. Use host networking when running UDP ASSOCIATE through Docker.
 
@@ -56,8 +56,7 @@ SOCKS5 UDP ASSOCIATE uses an ephemeral UDP relay port per session. Use host netw
 ```bash
 tinysocks 127.0.0.1:1080 \
   --username admin \
-  --password change-me \
-  run
+  --password change-me
 ```
 
 Clients can connect to the same address and port with either SOCKS5 or HTTP proxy protocol.
@@ -80,7 +79,7 @@ CLI arguments take precedence over environment variables. Configure username/pas
 
 ## Service Installation
 
-`install` and `uninstall` manage host services.
+`install` and `uninstall` manage host services. The Linux systemd service is named `tinysocks`; the Windows service is named `TinySocks`.
 
 ### Linux systemd
 

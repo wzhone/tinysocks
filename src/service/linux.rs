@@ -7,8 +7,9 @@ use std::{
 use anyhow::{Context, Result, bail};
 use tinysocks::config::{Config, RuntimeOptions};
 
-use super::{DEFAULT_SERVICE_NAME, SERVICE_DESCRIPTION};
+use super::SERVICE_DESCRIPTION;
 
+const LINUX_SERVICE_NAME: &str = "tinysocks";
 const DEFAULT_LINUX_BIN_DIR: &str = "/usr/local/bin";
 const DEFAULT_LINUX_CONFIG_DIR: &str = "/etc/tinysocks";
 const SYSTEMD_UNIT_DIR: &str = "/etc/systemd/system";
@@ -78,7 +79,6 @@ fn linux_service_args(options: &RuntimeOptions) -> Result<Vec<String>> {
     Config::from_runtime_options(options.clone())?;
 
     let mut args = vec![
-        "run".to_string(),
         options.bind.clone(),
         "--max-connections".to_string(),
         options.max_connections.to_string(),
@@ -139,7 +139,7 @@ fn build_unit(
 pub(crate) fn install(options: &RuntimeOptions) -> Result<()> {
     Config::from_runtime_options(options.clone())?;
 
-    let service_name = DEFAULT_SERVICE_NAME;
+    let service_name = LINUX_SERVICE_NAME;
     let installed_bin = installed_bin_path(service_name);
     let env_path = env_file_path(service_name);
     let unit_path = unit_path(service_name);
@@ -223,7 +223,7 @@ fn run_systemctl(args: &[&str]) -> Result<()> {
 
 /// Stop, disable, and remove the Linux systemd service.
 pub(crate) fn uninstall() -> Result<()> {
-    let service_name = DEFAULT_SERVICE_NAME;
+    let service_name = LINUX_SERVICE_NAME;
     let installed_bin = installed_bin_path(service_name);
     let env_path = env_file_path(service_name);
     let unit_path = unit_path(service_name);
@@ -298,7 +298,7 @@ mod tests {
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("WantedBy=multi-user.target"));
         assert!(unit.contains(
-            "ExecStart=/usr/local/bin/tinysocks run 0.0.0.0:1080 --max-connections 2048 --bypass-ip 127.0.0.0/8,::1/128"
+            "ExecStart=/usr/local/bin/tinysocks 0.0.0.0:1080 --max-connections 2048 --bypass-ip 127.0.0.0/8,::1/128"
         ));
         assert!(!unit.contains("secret"));
     }

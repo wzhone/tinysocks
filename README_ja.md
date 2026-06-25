@@ -47,7 +47,7 @@ cargo build --release --locked
 
 ### Docker
 
-コンテナはデフォルトで `tinysocks run` を実行し、`0.0.0.0:1080` で待ち受けます。実行時オプションは環境変数で設定できます。また、イメージ名の後に CLI 引数を追加して上書きできます。
+コンテナはデフォルトで `tinysocks` を実行し、`0.0.0.0:1080` で待ち受けます。実行時オプションは環境変数で設定できます。また、イメージ名の後に CLI 引数を追加して上書きできます。
 
 SOCKS5 UDP ASSOCIATE は、セッションごとに一時 UDP リレーポートを使用します。Docker で UDP ASSOCIATE を使用する場合は host network を使用してください。
 
@@ -56,8 +56,7 @@ SOCKS5 UDP ASSOCIATE は、セッションごとに一時 UDP リレーポート
 ```bash
 tinysocks 127.0.0.1:1080 \
   --username admin \
-  --password change-me \
-  run
+  --password change-me
 ```
 
 クライアントは、同じアドレスとポートに SOCKS5 または HTTP プロキシプロトコルで接続できます。
@@ -80,7 +79,7 @@ CLI 引数は環境変数より優先されます。ユーザー名/パスワー
 
 ## サービスインストール
 
-`install` と `uninstall` はホストサービスの管理に使用します。
+`install` と `uninstall` はホストサービスの管理に使用します。Linux systemd サービス名は `tinysocks`、Windows サービス名は `TinySocks` です。
 
 ### Linux systemd
 
