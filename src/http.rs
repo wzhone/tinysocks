@@ -301,7 +301,9 @@ async fn handle_connect(
             .await
             .inspect_err(|err| {
                 stats.inc_relay_failures();
-                stats.record_error(format!("HTTP CONNECT relay {target} failed from {peer}: {err}"));
+                stats.record_error(format!(
+                    "HTTP CONNECT relay {target} failed from {peer}: {err}"
+                ));
             })
             .context("HttpError::RelayFailed")?;
     stats.add_tcp_bytes(up, down);
@@ -324,7 +326,9 @@ async fn handle_forward(
         .await
         .inspect_err(|err| {
             stats.inc_connect_failures();
-            stats.record_error(format!("HTTP forward connect {target} failed from {peer}: {err}"));
+            stats.record_error(format!(
+                "HTTP forward connect {target} failed from {peer}: {err}"
+            ));
         })
         .context("HttpError::ConnectFailed")?;
     let _ = outbound.set_nodelay(true);
@@ -371,7 +375,9 @@ async fn handle_forward(
             .await
             .inspect_err(|err| {
                 stats.inc_relay_failures();
-                stats.record_error(format!("HTTP forward relay {target} failed from {peer}: {err}"));
+                stats.record_error(format!(
+                    "HTTP forward relay {target} failed from {peer}: {err}"
+                ));
             })
             .context("HttpError::RelayFailed")?;
     stats.add_tcp_bytes(up, down);

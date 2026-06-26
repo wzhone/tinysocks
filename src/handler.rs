@@ -21,7 +21,12 @@ const UDP_BUFFER_SIZE: usize = 65_535;
 const MAX_UDP_REMOTE_ENDPOINTS: usize = 1024;
 
 /// Handle a SOCKS5 TCP CONNECT request.
-pub async fn handle_connect<S>(inbound: &mut S, addr: Address, stats: &Stats, peer: std::net::SocketAddr) -> Result<()>
+pub async fn handle_connect<S>(
+    inbound: &mut S,
+    addr: Address,
+    stats: &Stats,
+    peer: std::net::SocketAddr,
+) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -45,7 +50,9 @@ where
             .await
             .inspect_err(|err| {
                 stats.inc_relay_failures();
-                stats.record_error(format!("SOCKS TCP relay {target} failed from {peer}: {err}"));
+                stats.record_error(format!(
+                    "SOCKS TCP relay {target} failed from {peer}: {err}"
+                ));
             })
             .context("Failed to proxy traffic")?;
     stats.add_tcp_bytes(up, down);
@@ -182,7 +189,9 @@ async fn handle_client_udp_packet(
     let target = match datagram.destination.resolve_socket_addr().await {
         Ok(target) => target,
         Err(err) => {
-            stats.record_error(format!("SOCKS UDP target resolution failed from {tcp_peer}: {err}"));
+            stats.record_error(format!(
+                "SOCKS UDP target resolution failed from {tcp_peer}: {err}"
+            ));
             println!("SOCKS UDP target resolution failed: {err}");
             return Ok(());
         }
@@ -198,7 +207,9 @@ async fn handle_client_udp_packet(
         .context("SOCKS UDP relay request send failed")
     {
         stats.inc_relay_failures();
-        stats.record_error(format!("SOCKS UDP relay request send failed from {tcp_peer}: {err}"));
+        stats.record_error(format!(
+            "SOCKS UDP relay request send failed from {tcp_peer}: {err}"
+        ));
         println!("{err}");
         return Ok(());
     }
