@@ -158,7 +158,7 @@ impl ProxyServer {
 
                             match req.cmd {
                                 crate::protocol::Command::Connect(addr) => {
-                                    handle_connect(&mut stream, addr, &stats).await?;
+                                    handle_connect(&mut stream, addr, &stats, peer).await?;
                                 }
                                 crate::protocol::Command::UdpAssociate(addr) => {
                                     let relay_bind_ip = stream.local_addr()?.ip();
@@ -181,6 +181,7 @@ impl ProxyServer {
                                 COPY_BUFFER,
                                 &stats,
                                 stats_port,
+                                peer,
                             )
                             .await?;
                         }

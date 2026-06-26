@@ -286,28 +286,31 @@ fn render_template(template: &str, replacements: &[(&str, String)]) -> String {
     rendered
 }
 
-/// Format a byte count as megabytes with two decimals.
+/// Format a byte count with adaptive unit (MB or GB).
 fn format_bytes(bytes: u64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
 
-    format!("{:.2} MB", bytes as f64 / MB)
+    if bytes as f64 >= GB {
+        format!("{:.2} GB", bytes as f64 / GB)
+    } else {
+        format!("{:.2} MB", bytes as f64 / MB)
+    }
 }
 
-/// Format a duration in seconds for compact display.
 fn format_duration(seconds: u64) -> String {
     let days = seconds / 86_400;
     let hours = (seconds % 86_400) / 3_600;
     let minutes = (seconds % 3_600) / 60;
-    let seconds = seconds % 60;
 
     if days > 0 {
-        format!("{days}d {hours:02}h {minutes:02}m {seconds:02}s")
+        format!("{days}d {hours}h {minutes}min")
     } else if hours > 0 {
-        format!("{hours}h {minutes:02}m {seconds:02}s")
-    } else if minutes > 0 {
-        format!("{minutes}m {seconds:02}s")
+        format!("{hours}h {minutes}min")
+    } else if minutes >= 1 {
+        format!("{minutes}min")
     } else {
-        format!("{seconds}s")
+        "1min".to_string()
     }
 }
 
@@ -475,18 +478,43 @@ mod tests {
     }
 
     #[test]
-    fn format_bytes_large() {
-        // ~1 GB
-        let one_gb = 1073741824u64;
-        assert_eq!(format_bytes(one_gb), "1024.00 MB");
+    fn format_bytes_exact_gb() {
+        let one_gb = 1024 * 1024 * 1024u64;
+        assert_eq!(format_bytes(one_gb), "1.00 GB");
+    }
+
+    #[test]
+    fn format_bytes_fractional_gb() {
+        // 1.5 GB
+        let bytes = 1024 * 1024 * 1024 + 512 * 1024 * 1024;
+        assert_eq!(format_bytes(bytes), "1.50 GB");
+    }
+
+    #[test]
+    fn format_bytes_large_gb() {
+        // 10 GB
+        let bytes = 10 * 1024 * 1024 * 1024u64;
+        assert_eq!(format_bytes(bytes), "10.00 GB");
+    }
+
+    #[test]
+    fn format_bytes_just_under_gb() {
+        // 1023 MB stays in MB
+        let bytes = 1023 * 1024 * 1024u64;
+        assert_eq!(format_bytes(bytes), "1023.00 MB");
     }
 
     #[test]
     fn format_duration_compacts_seconds() {
-        assert_eq!(format_duration(0), "0s");
-        assert_eq!(format_duration(65), "1m 05s");
-        assert_eq!(format_duration(3_661), "1h 01m 01s");
-        assert_eq!(format_duration(90_061), "1d 01h 01m 01s");
+        assert_eq!(format_duration(0), "1min");
+        assert_eq!(format_duration(30), "1min");
+        assert_eq!(format_duration(59), "1min");
+        assert_eq!(format_duration(60), "1min");
+        assert_eq!(format_duration(65), "1min");
+        assert_eq!(format_duration(120), "2min");
+        assert_eq!(format_duration(3_661), "1h 1min");
+        assert_eq!(format_duration(7_200), "2h 0min");
+        assert_eq!(format_duration(90_061), "1d 1h 1min");
     }
 
     #[test]

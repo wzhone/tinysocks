@@ -21,7 +21,7 @@ const UDP_BUFFER_SIZE: usize = 65_535;
 const MAX_UDP_REMOTE_ENDPOINTS: usize = 1024;
 
 /// Handle a SOCKS5 TCP CONNECT request.
-pub async fn handle_connect<S>(inbound: &mut S, addr: Address, stats: &Stats) -> Result<()>
+pub async fn handle_connect<S>(inbound: &mut S, addr: Address, stats: &Stats, peer: std::net::SocketAddr) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -30,7 +30,7 @@ where
         .await
         .inspect_err(|e| {
             stats.inc_connect_failures();
-            stats.record_error(format!("SOCKS connect {target} failed: {e}"));
+            stats.record_error(format!("SOCKS connect {target} failed from {peer}: {e}"));
             println!("connect target {} failed: {}", target, e);
         })
         .context("SocksError::ConnectionFailed")?;
@@ -45,7 +45,7 @@ where
             .await
             .inspect_err(|err| {
                 stats.inc_relay_failures();
-                stats.record_error(format!("SOCKS TCP relay failed: {err}"));
+                stats.record_error(format!("SOCKS TCP relay {target} failed from {peer}: {err}"));
             })
             .context("Failed to proxy traffic")?;
     stats.add_tcp_bytes(up, down);
@@ -104,7 +104,7 @@ where
                 let (len, source) = received
                     .inspect_err(|err| {
                         stats.inc_relay_failures();
-                        stats.record_error(format!("SOCKS UDP relay receive failed: {err}"));
+                        stats.record_error(format!("SOCKS UDP relay receive failed from {tcp_peer}: {err}"));
                     })
                     .context("SOCKS UDP relay receive failed")?;
 
@@ -118,6 +118,7 @@ where
                         &mut client_udp_addr,
                         &mut relayed_targets,
                         stats,
+                        tcp_peer,
                     ).await?;
                     continue;
                 }
@@ -130,6 +131,7 @@ where
                         &mut client_udp_addr,
                         &mut relayed_targets,
                         stats,
+                        tcp_peer,
                     ).await?;
                     continue;
                 }
@@ -145,7 +147,7 @@ where
                         .await
                         .inspect_err(|err| {
                             stats.inc_relay_failures();
-                            stats.record_error(format!("SOCKS UDP relay response send failed: {err}"));
+                            stats.record_error(format!("SOCKS UDP relay response send failed from {tcp_peer}: {err}"));
                         })
                         .context("SOCKS UDP relay response send failed")?;
                 }
@@ -162,6 +164,7 @@ async fn handle_client_udp_packet(
     client_udp_addr: &mut Option<SocketAddr>,
     relayed_targets: &mut HashSet<SocketAddr>,
     stats: &Stats,
+    tcp_peer: SocketAddr,
 ) -> Result<()> {
     let datagram = match parse_udp_datagram(packet) {
         Ok(Some(datagram)) => datagram,
@@ -179,7 +182,7 @@ async fn handle_client_udp_packet(
     let target = match datagram.destination.resolve_socket_addr().await {
         Ok(target) => target,
         Err(err) => {
-            stats.record_error(format!("SOCKS UDP target resolution failed: {err}"));
+            stats.record_error(format!("SOCKS UDP target resolution failed from {tcp_peer}: {err}"));
             println!("SOCKS UDP target resolution failed: {err}");
             return Ok(());
         }
@@ -195,7 +198,7 @@ async fn handle_client_udp_packet(
         .context("SOCKS UDP relay request send failed")
     {
         stats.inc_relay_failures();
-        stats.record_error(format!("SOCKS UDP relay request send failed: {err}"));
+        stats.record_error(format!("SOCKS UDP relay request send failed from {tcp_peer}: {err}"));
         println!("{err}");
         return Ok(());
     }
@@ -209,6 +212,10 @@ mod tests {
     use std::net::Ipv4Addr;
     use tokio::net::UdpSocket;
     use tokio::time::{Duration, timeout};
+
+    fn dummy_tcp_peer() -> SocketAddr {
+        "127.0.0.1:50000".parse().unwrap()
+    }
 
     fn udp_datagram(target_port: u16, payload: &[u8]) -> Vec<u8> {
         encode_udp_datagram(
@@ -235,6 +242,7 @@ mod tests {
             &mut client_addr,
             &mut allowed,
             &stats,
+            dummy_tcp_peer(),
         )
         .await
         .unwrap();
@@ -261,6 +269,7 @@ mod tests {
             &mut client_addr,
             &mut allowed,
             &stats,
+            dummy_tcp_peer(),
         )
         .await
         .unwrap();
@@ -287,6 +296,7 @@ mod tests {
                 &mut client_addr,
                 &mut allowed,
                 &stats,
+                dummy_tcp_peer(),
             ),
         )
         .await
@@ -313,6 +323,7 @@ mod tests {
             &mut client_addr,
             &mut allowed,
             &stats,
+            dummy_tcp_peer(),
         )
         .await
         .unwrap();
@@ -336,6 +347,7 @@ mod tests {
             &mut client_addr,
             &mut allowed,
             &stats,
+            dummy_tcp_peer(),
         )
         .await
         .unwrap();
@@ -362,6 +374,7 @@ mod tests {
                 &mut client_addr,
                 &mut allowed,
                 &stats,
+                dummy_tcp_peer(),
             )
             .await
             .unwrap();
@@ -377,6 +390,7 @@ mod tests {
             &mut client_addr,
             &mut allowed,
             &stats,
+            dummy_tcp_peer(),
         )
         .await
         .unwrap();

@@ -36,13 +36,14 @@ pub async fn handle_http_proxy(
     copy_buf_size: usize,
     stats: &Stats,
     listener_port: u16,
+    peer: std::net::SocketAddr,
 ) -> Result<()> {
     let mut req = read_http_request(stream).await?;
 
     if is_stats_request(&req, listener_port) {
         if !bypass_auth && !stats_authorized(&req, auth) {
             stats.inc_auth_failures();
-            stats.record_error("stats page authentication failed");
+            stats.record_error(format!("stats page authentication failed from {peer}"));
             send_stats_auth_required(stream).await?;
             return Ok(());
         }
@@ -52,15 +53,15 @@ pub async fn handle_http_proxy(
     if !bypass_auth && !http_basic_authorized(get_header(&req.headers, "proxy-authorization"), auth)
     {
         stats.inc_auth_failures();
-        stats.record_error("HTTP proxy authentication failed");
+        stats.record_error(format!("HTTP proxy authentication failed from {peer}"));
         send_proxy_auth_required(stream).await?;
         return Ok(());
     }
 
     if req.method.eq_ignore_ascii_case("CONNECT") {
-        handle_connect(stream, &req, copy_buf_size, stats).await
+        handle_connect(stream, &req, copy_buf_size, stats, peer).await
     } else {
-        handle_forward(stream, &mut req, copy_buf_size, stats).await
+        handle_forward(stream, &mut req, copy_buf_size, stats, peer).await
     }
 }
 
@@ -263,6 +264,7 @@ async fn handle_connect(
     req: &HttpRequest,
     copy_buf_size: usize,
     stats: &Stats,
+    peer: std::net::SocketAddr,
 ) -> Result<()> {
     let (host, port) = parse_connect_target(&req.target)?;
     let target = format_target_endpoint(&host, port);
@@ -270,7 +272,7 @@ async fn handle_connect(
         .await
         .inspect_err(|err| {
             stats.inc_connect_failures();
-            stats.record_error(format!("HTTP CONNECT {target} failed: {err}"));
+            stats.record_error(format!("HTTP CONNECT {target} failed from {peer}: {err}"));
         })
         .context("HttpError::ConnectFailed")?;
     let _ = outbound.set_nodelay(true);
@@ -299,7 +301,7 @@ async fn handle_connect(
             .await
             .inspect_err(|err| {
                 stats.inc_relay_failures();
-                stats.record_error(format!("HTTP CONNECT relay failed for {target}: {err}"));
+                stats.record_error(format!("HTTP CONNECT relay {target} failed from {peer}: {err}"));
             })
             .context("HttpError::RelayFailed")?;
     stats.add_tcp_bytes(up, down);
@@ -312,6 +314,7 @@ async fn handle_forward(
     req: &mut HttpRequest,
     copy_buf_size: usize,
     stats: &Stats,
+    peer: std::net::SocketAddr,
 ) -> Result<()> {
     let host_header = get_header(&req.headers, "host").map(|s| s.to_string());
     let (host, port, path) = split_target(&req.target, host_header.as_deref(), 80)?;
@@ -321,7 +324,7 @@ async fn handle_forward(
         .await
         .inspect_err(|err| {
             stats.inc_connect_failures();
-            stats.record_error(format!("HTTP forward connect {target} failed: {err}"));
+            stats.record_error(format!("HTTP forward connect {target} failed from {peer}: {err}"));
         })
         .context("HttpError::ConnectFailed")?;
     let _ = outbound.set_nodelay(true);
@@ -368,7 +371,7 @@ async fn handle_forward(
             .await
             .inspect_err(|err| {
                 stats.inc_relay_failures();
-                stats.record_error(format!("HTTP forward relay failed for {target}: {err}"));
+                stats.record_error(format!("HTTP forward relay {target} failed from {peer}: {err}"));
             })
             .context("HttpError::RelayFailed")?;
     stats.add_tcp_bytes(up, down);
