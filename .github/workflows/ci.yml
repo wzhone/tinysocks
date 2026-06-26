@@ -20,7 +20,16 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-          components: clippy, rustfmt
+          components: clippy, rustfmt, llvm-tools-preview
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Audit dependencies
+        run: cargo audit
 
       - name: cargo fmt
         run: cargo +${{ env.RUST_VERSION }} fmt --all -- --check
@@ -36,3 +45,17 @@ jobs:
 
       - name: curl e2e tests
         run: .github/scripts/e2e-curl.sh
+
+      - name: Generate coverage summary
+        run: |
+          mkdir -p target/llvm-cov
+          cargo +${{ env.RUST_VERSION }} llvm-cov --workspace --locked --summary-only | tee target/llvm-cov/coverage-summary.txt
+          {
+            echo "## Coverage Summary"
+            echo
+            echo '```text'
+            cat target/llvm-cov/coverage-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
