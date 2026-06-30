@@ -57,17 +57,21 @@ pub fn http_basic_authorized(auth_header: Option<&str>, auth: &AuthConfig) -> bo
         None => return false,
     };
 
-    if value.len() < 6 {
+    let bytes = value.as_bytes();
+    if bytes.len() < 6 {
         return false;
     }
 
-    // Check `Basic ` prefix without allocating lowercase copies.
-    let prefix = &value[..5];
-    if !prefix.eq_ignore_ascii_case("Basic") || value.as_bytes()[5] != b' ' {
+    // Check `Basic ` prefix without allocating lowercase copies and without
+    // indexing the header as UTF-8 text.
+    if !bytes[..5].eq_ignore_ascii_case(b"Basic") || bytes[5] != b' ' {
         return false;
     }
 
-    let encoded = value[6..].trim_start();
+    let encoded = bytes[6..]
+        .iter()
+        .position(|b| !matches!(b, b' ' | b'\t'))
+        .map_or(&[][..], |start| &bytes[6 + start..]);
     let decoded = match STANDARD.decode(encoded) {
         Ok(v) => v,
         Err(_) => return false,
