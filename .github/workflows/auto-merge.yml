@@ -1,21 +1,29 @@
 name: Auto-merge Dependabot PRs
 
 on:
-  pull_request:
+  workflow_run:
+    workflows:
+      - CI
     types:
-      - opened
-      - synchronize
-      - reopened
+      - completed
+    branches:
+      - "dependabot/**"
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   automerge:
-    if: github.actor == 'dependabot[bot]'
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.pull_requests[0].number != null
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
+    timeout-minutes: 5
     steps:
       - uses: fastify/github-action-merge-dependabot@73ec4cbb5e56df5591eae286972d5b2201ffe90f # v3.15.0
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
           merge-method: squash
