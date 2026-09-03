@@ -33,7 +33,7 @@ jobs:
         uses: taiki-e/install-action@9db2e3e17e998ef5ab5a82b04af9122124e2dc4f # cargo-audit
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@b1d53d4d726d74b5a950a5b3798a3c6ede4e0f64 # cargo-llvm-cov
+        uses: taiki-e/install-action@9db2e3e17e998ef5ab5a82b04af9122124e2dc4f # cargo-llvm-cov
 
       - name: Audit dependencies
         run: cargo audit
