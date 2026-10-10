@@ -8,9 +8,17 @@ updates:
       - "dependencies"
     open-pull-requests-limit: 5
     groups:
+      backend-patches:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
       backend-dependencies:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -21,6 +29,14 @@ updates:
       - "actions"
     open-pull-requests-limit: 5
     groups:
+      actions-patches:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
       actions-dependencies:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "major"
