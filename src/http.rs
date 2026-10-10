@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result, anyhow, bail};
 use http::uri::Authority;
+use std::{collections::hash_map::RandomState, hash::BuildHasher};
 use tokio::io::copy_bidirectional_with_sizes;
 use tokio::net::TcpStream;
 
@@ -19,6 +20,21 @@ use crate::{
 
 const MAX_HEADER_SIZE: usize = 64 * 1024;
 const MAX_HEADERS: usize = 128;
+
+pub struct HttpListener {
+    port: u16,
+    via: String,
+}
+
+impl HttpListener {
+    pub fn new(port: u16) -> Self {
+        Self {
+            port,
+            // 每个监听器使用独立标识，避免误拒绝经过其他 TinySocks 的请求。
+            via: format!("tinysocks-{:016x}", RandomState::new().hash_one(port)),
+        }
+    }
+}
 
 struct HttpRequest {
     method: String,
@@ -35,12 +51,22 @@ pub async fn handle_http_proxy(
     auth: &AuthConfig,
     copy_buf_size: usize,
     stats: &Stats,
-    listener_port: u16,
+    listener: &HttpListener,
     peer: std::net::SocketAddr,
 ) -> Result<()> {
     let mut req = read_http_request(stream).await?;
 
-    if is_stats_request(&req, listener_port) {
+    if has_proxy_via(&req.headers, &listener.via) {
+        write_all_with_timeout(
+            stream,
+            b"HTTP/1.1 508 Loop Detected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            "HTTP loop response write",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if stats.is_enabled() && is_stats_request(&req, listener.port) {
         if !bypass_auth && !stats_authorized(&req, auth) {
             stats.inc_auth_failures();
             stats.record_error(format!("stats page authentication failed from {peer}"));
@@ -61,7 +87,7 @@ pub async fn handle_http_proxy(
     if req.method.eq_ignore_ascii_case("CONNECT") {
         handle_connect(stream, &req, copy_buf_size, stats, peer).await
     } else {
-        handle_forward(stream, &mut req, copy_buf_size, stats, peer).await
+        handle_forward(stream, &mut req, copy_buf_size, stats, peer, &listener.via).await
     }
 }
 
@@ -172,6 +198,14 @@ fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str
         .iter()
         .find(|(n, _)| n.eq_ignore_ascii_case(name))
         .map(|(_, v)| v.as_str())
+}
+
+fn has_proxy_via(headers: &[(String, String)], via: &str) -> bool {
+    headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("via"))
+        .flat_map(|(_, value)| value.split(','))
+        .any(|hop| hop.split_whitespace().nth(1) == Some(via))
 }
 
 /// Check whether a request targets the built-in stats page.
@@ -317,6 +351,7 @@ async fn handle_forward(
     copy_buf_size: usize,
     stats: &Stats,
     peer: std::net::SocketAddr,
+    via: &str,
 ) -> Result<()> {
     let host_header = get_header(&req.headers, "host").map(|s| s.to_string());
     let (host, port, path) = split_target(&req.target, host_header.as_deref(), 80)?;
@@ -354,6 +389,8 @@ async fn handle_forward(
     request.push_str(&host_header);
     request.push_str("\r\n");
 
+    // 回环检测依赖中间代理保留 Via，经过删除此头的代理时再增加目标地址拦截。
+    request.push_str(&format!("Via: {} {via}\r\n", req.version));
     request.push_str("\r\n");
 
     let initial_up = request.len() as u64 + req.body_start.len() as u64;
@@ -515,6 +552,20 @@ fn format_host_header(host: &str, port: u16, default_port: u16) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proxy_via_detects_own_hop_in_multiple_headers_and_hop_lists() {
+        let headers = vec![
+            ("Via".to_string(), "1.0 other-proxy".to_string()),
+            (
+                "vIa".to_string(),
+                "HTTP/1.1 tinysocks-own, 1.1 last-proxy".to_string(),
+            ),
+        ];
+        assert!(has_proxy_via(&headers, "tinysocks-own"));
+        assert!(!has_proxy_via(&headers, "tinysocks-other"));
+        assert!(!has_proxy_via(&headers, "tinysocks"));
+    }
 
     fn request(method: &str, target: &str, host: &str) -> HttpRequest {
         HttpRequest {

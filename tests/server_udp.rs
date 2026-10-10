@@ -33,6 +33,7 @@ async fn socks_udp_associate_relays_datagrams_and_locks_client_source() {
         server: ServerConfig {
             bind: format!("127.0.0.1:{proxy_port}"),
             max_connections: 1024,
+            disable_stats: true,
         },
         auth: AuthConfig {
             username: Some("user".to_string()),

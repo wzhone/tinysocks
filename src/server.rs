@@ -15,7 +15,7 @@ use crate::{
     auth::{basic_authenticate, ip_authenticate},
     config::{AuthConfig, Config},
     handler::{handle_connect, handle_udp_associate},
-    http::handle_http_proxy,
+    http::{HttpListener, handle_http_proxy},
     io_timeout::read_with_timeout,
     protocol::{AuthMethod, PrefixedStream, SOCKS_VERSION, handshake, read_request},
     stats::Stats,
@@ -49,7 +49,11 @@ impl ProxyServer {
             bind: server.bind,
             max_connections: server.max_connections,
             auth,
-            stats,
+            stats: if server.disable_stats {
+                Stats::disabled()
+            } else {
+                stats
+            },
         })
     }
 
@@ -58,7 +62,7 @@ impl ProxyServer {
         let listener = TcpListener::bind(&self.bind)
             .await
             .with_context(|| format!("Failed to bind {}", self.bind))?;
-        let stats_port = listener.local_addr()?.port();
+        let http_listener = Arc::new(HttpListener::new(listener.local_addr()?.port()));
         let limiter = Arc::new(Semaphore::new(self.max_connections));
 
         println!(
@@ -87,6 +91,7 @@ impl ProxyServer {
 
             let auth_cfg = self.auth.clone();
             let stats = self.stats.clone();
+            let http_listener = http_listener.clone();
 
             stats.inc_total_connections();
             stats.inc_active_connections();
@@ -180,7 +185,7 @@ impl ProxyServer {
                                 &auth_cfg,
                                 COPY_BUFFER,
                                 &stats,
-                                stats_port,
+                                &http_listener,
                                 peer,
                             )
                             .await?;
@@ -210,6 +215,7 @@ mod tests {
             server: ServerConfig {
                 bind: bind.to_string(),
                 max_connections: 16,
+                disable_stats: false,
             },
             auth: AuthConfig {
                 username: Some("user".to_string()),

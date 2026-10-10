@@ -87,6 +87,9 @@ fn linux_service_args(options: &RuntimeOptions) -> Result<Vec<String>> {
         args.push("--bypass-ip".to_string());
         args.push(options.bypass_ips.join(","));
     }
+    if options.disable_stats {
+        args.push("--disable-stats".to_string());
+    }
     Ok(args)
 }
 
@@ -277,6 +280,7 @@ mod tests {
         RuntimeOptions {
             bind: "0.0.0.0:1080".to_string(),
             max_connections: 2048,
+            disable_stats: false,
             username: Some("admin".to_string()),
             password: Some("secret".to_string()),
             bypass_ips: vec!["127.0.0.0/8".to_string(), "::1/128".to_string()],
@@ -301,6 +305,20 @@ mod tests {
             "ExecStart=/usr/local/bin/tinysocks 0.0.0.0:1080 --max-connections 2048 --bypass-ip 127.0.0.0/8,::1/128"
         ));
         assert!(!unit.contains("secret"));
+        assert!(!unit.contains("--disable-stats"));
+    }
+
+    #[test]
+    fn systemd_unit_preserves_disabled_stats() {
+        let mut options = sample_options();
+        options.disable_stats = true;
+        let unit = build_unit(
+            Path::new("/usr/local/bin/tinysocks"),
+            Some(Path::new("/etc/tinysocks/tinysocks.env")),
+            &options,
+        )
+        .expect("should build unit");
+        assert!(unit.contains("--disable-stats\n"));
     }
 
     #[test]

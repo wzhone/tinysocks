@@ -32,6 +32,14 @@ pub struct Cli {
     max_connections: usize,
 
     #[arg(
+        long,
+        global = true,
+        env = "TINYSOCKS_DISABLE_STATS",
+        help = "Disable statistics collection and the /stats page"
+    )]
+    disable_stats: bool,
+
+    #[arg(
         short,
         long,
         global = true,
@@ -69,6 +77,7 @@ impl Cli {
         RuntimeOptions {
             bind: self.bind.clone(),
             max_connections: self.max_connections,
+            disable_stats: self.disable_stats,
             username: self.username.clone(),
             password: self.password.clone(),
             bypass_ips: self.bypass_ips.clone(),
@@ -137,6 +146,7 @@ mod tests {
 
         let options = cli.runtime_options();
         assert_eq!(options.bind, "127.0.0.1:2080");
+        assert!(!options.disable_stats);
         assert!(cli.command.is_none());
     }
 
@@ -149,12 +159,14 @@ mod tests {
             "admin",
             "--password",
             "secret",
+            "--disable-stats",
             "install",
         ])
         .expect("should parse CLI");
 
         let options = cli.runtime_options();
         assert_eq!(options.bind, "127.0.0.1:2081");
+        assert!(options.disable_stats);
         assert!(matches!(cli.command, Some(Command::Install)));
     }
 
@@ -168,11 +180,13 @@ mod tests {
             "admin",
             "--password",
             "secret",
+            "--disable-stats",
         ])
         .expect("should parse CLI");
 
         let options = cli.runtime_options();
         assert_eq!(options.bind, "127.0.0.1:2082");
+        assert!(options.disable_stats);
         assert!(matches!(cli.command, Some(Command::Winsvc)));
     }
 

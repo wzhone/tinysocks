@@ -43,6 +43,7 @@ async fn socks_connect_relays_ipv6_targets() {
         server: ServerConfig {
             bind: format!("[::1]:{proxy_port}"),
             max_connections: 1024,
+            disable_stats: false,
         },
         auth: AuthConfig {
             username: Some("user".to_string()),

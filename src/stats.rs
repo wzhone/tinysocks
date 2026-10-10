@@ -13,8 +13,14 @@ const MAX_RECENT_ERRORS: usize = 100;
 const MAX_ERROR_MESSAGE_CHARS: usize = 240;
 
 /// A cheaply-cloneable handle to the proxy-wide statistics.
-#[derive(Clone, Default)]
-pub struct Stats(Arc<StatsInner>);
+#[derive(Clone)]
+pub struct Stats(Option<Arc<StatsInner>>);
+
+impl Default for Stats {
+    fn default() -> Self {
+        Self(Some(Arc::new(StatsInner::default())))
+    }
+}
 
 struct StatsInner {
     started_at: Instant,
@@ -88,8 +94,20 @@ pub struct StatsSnapshot {
 }
 
 impl Stats {
+    /// 创建不分配计数器和错误缓存的统计句柄。
+    pub fn disabled() -> Self {
+        Self(None)
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.0.is_some()
+    }
+
     /// Render the current statistics snapshot as an HTML page.
     pub fn render_html(&self) -> String {
+        if !self.is_enabled() {
+            return String::new();
+        }
         let snapshot = self.snapshot();
         let total_traffic = snapshot
             .tcp_bytes_up
@@ -136,22 +154,25 @@ impl Stats {
 
     /// Return a point-in-time snapshot of all statistics.
     pub fn snapshot(&self) -> StatsSnapshot {
+        let Some(inner) = &self.0 else {
+            return StatsSnapshot::default();
+        };
         let r = |a: &AtomicU64| a.load(Ordering::Relaxed);
         StatsSnapshot {
-            uptime_seconds: self.0.started_at.elapsed().as_secs(),
-            total_connections: r(&self.0.total_connections),
-            active_connections: r(&self.0.active_connections),
-            socks5_connections: r(&self.0.socks5_connections),
-            http_connections: r(&self.0.http_connections),
-            connection_limit_rejections: r(&self.0.connection_limit_rejections),
-            tcp_bytes_up: r(&self.0.tcp_bytes_up),
-            tcp_bytes_down: r(&self.0.tcp_bytes_down),
-            udp_associate_sessions: r(&self.0.udp_associate_sessions),
-            udp_bytes_in: r(&self.0.udp_bytes_in),
-            udp_bytes_out: r(&self.0.udp_bytes_out),
-            connect_failures: r(&self.0.connect_failures),
-            auth_failures: r(&self.0.auth_failures),
-            relay_failures: r(&self.0.relay_failures),
+            uptime_seconds: inner.started_at.elapsed().as_secs(),
+            total_connections: r(&inner.total_connections),
+            active_connections: r(&inner.active_connections),
+            socks5_connections: r(&inner.socks5_connections),
+            http_connections: r(&inner.http_connections),
+            connection_limit_rejections: r(&inner.connection_limit_rejections),
+            tcp_bytes_up: r(&inner.tcp_bytes_up),
+            tcp_bytes_down: r(&inner.tcp_bytes_down),
+            udp_associate_sessions: r(&inner.udp_associate_sessions),
+            udp_bytes_in: r(&inner.udp_bytes_in),
+            udp_bytes_out: r(&inner.udp_bytes_out),
+            connect_failures: r(&inner.connect_failures),
+            auth_failures: r(&inner.auth_failures),
+            relay_failures: r(&inner.relay_failures),
         }
     }
 
@@ -159,80 +180,107 @@ impl Stats {
 
     /// Increment the total accepted connection counter.
     pub fn inc_total_connections(&self) {
-        self.0.total_connections.fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.total_connections.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Increment the active connection counter.
     pub fn inc_active_connections(&self) {
-        self.0.active_connections.fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.active_connections.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Decrement the active connection counter.
     pub fn dec_active_connections(&self) {
-        self.0.active_connections.fetch_sub(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.active_connections.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 
     /// Increment the SOCKS5 connection counter.
     pub fn inc_socks5_connections(&self) {
-        self.0.socks5_connections.fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.socks5_connections.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Increment the HTTP connection counter.
     pub fn inc_http_connections(&self) {
-        self.0.http_connections.fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.http_connections.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Increment the connection-limit rejection counter.
     pub fn inc_connection_limit_rejections(&self) {
-        self.0
-            .connection_limit_rejections
-            .fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner
+                .connection_limit_rejections
+                .fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     // -- TCP bytes --
 
     /// Add proxied TCP byte counts for both directions.
     pub fn add_tcp_bytes(&self, up: u64, down: u64) {
-        self.0.tcp_bytes_up.fetch_add(up, Ordering::Relaxed);
-        self.0.tcp_bytes_down.fetch_add(down, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.tcp_bytes_up.fetch_add(up, Ordering::Relaxed);
+            inner.tcp_bytes_down.fetch_add(down, Ordering::Relaxed);
+        }
     }
 
     // -- UDP --
 
     /// Increment the UDP ASSOCIATE session counter.
     pub fn inc_udp_associate_sessions(&self) {
-        self.0
-            .udp_associate_sessions
-            .fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.udp_associate_sessions.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Add remote-to-client UDP bytes.
     pub fn add_udp_bytes_in(&self, n: u64) {
-        self.0.udp_bytes_in.fetch_add(n, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.udp_bytes_in.fetch_add(n, Ordering::Relaxed);
+        }
     }
 
     /// Add client-to-remote UDP bytes.
     pub fn add_udp_bytes_out(&self, n: u64) {
-        self.0.udp_bytes_out.fetch_add(n, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.udp_bytes_out.fetch_add(n, Ordering::Relaxed);
+        }
     }
 
     /// Increment the outbound connection failure counter.
     pub fn inc_connect_failures(&self) {
-        self.0.connect_failures.fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.connect_failures.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Increment the authentication failure counter.
     pub fn inc_auth_failures(&self) {
-        self.0.auth_failures.fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.auth_failures.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Increment the relay failure counter.
     pub fn inc_relay_failures(&self) {
-        self.0.relay_failures.fetch_add(1, Ordering::Relaxed);
+        if let Some(inner) = &self.0 {
+            inner.relay_failures.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Record one recent error message for display on the stats page.
     pub fn record_error(&self, message: impl Into<String>) {
+        let Some(inner) = &self.0 else {
+            return;
+        };
         let unix_seconds = current_unix_seconds();
         let message = truncate_error_message(&normalize_error_message(&message.into()));
         let error = RecentError {
@@ -240,8 +288,7 @@ impl Stats {
             message,
         };
 
-        let mut errors = self
-            .0
+        let mut errors = inner
             .recent_errors
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -253,8 +300,10 @@ impl Stats {
 
     /// Render recent errors as table rows.
     fn render_recent_errors(&self) -> String {
-        let errors = self
-            .0
+        let Some(inner) = &self.0 else {
+            return String::new();
+        };
+        let errors = inner
             .recent_errors
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -361,6 +410,48 @@ fn escape_html(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_stats_do_not_collect_or_render() {
+        let stats = Stats::disabled().clone();
+        stats.inc_total_connections();
+        stats.inc_active_connections();
+        stats.dec_active_connections();
+        stats.inc_socks5_connections();
+        stats.inc_http_connections();
+        stats.inc_connection_limit_rejections();
+        stats.add_tcp_bytes(100, 200);
+        stats.inc_udp_associate_sessions();
+        stats.add_udp_bytes_in(300);
+        stats.add_udp_bytes_out(400);
+        stats.inc_connect_failures();
+        stats.inc_auth_failures();
+        stats.inc_relay_failures();
+        stats.record_error("should not be cached");
+
+        assert!(!stats.is_enabled());
+        assert!(stats.render_html().is_empty());
+        let snap = stats.snapshot();
+        assert_eq!(
+            [
+                snap.uptime_seconds,
+                snap.total_connections,
+                snap.active_connections,
+                snap.socks5_connections,
+                snap.http_connections,
+                snap.connection_limit_rejections,
+                snap.tcp_bytes_up,
+                snap.tcp_bytes_down,
+                snap.udp_associate_sessions,
+                snap.udp_bytes_in,
+                snap.udp_bytes_out,
+                snap.connect_failures,
+                snap.auth_failures,
+                snap.relay_failures,
+            ],
+            [0; 14]
+        );
+    }
 
     #[test]
     fn snapshot_returns_default_on_fresh_stats() {

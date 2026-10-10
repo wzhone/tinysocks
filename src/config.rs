@@ -12,6 +12,7 @@ pub const MAX_CONNECTIONS_LIMIT: usize = 1_000_000;
 pub struct ServerConfig {
     pub bind: String,
     pub max_connections: usize,
+    pub disable_stats: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +32,7 @@ pub struct Config {
 pub struct RuntimeOptions {
     pub bind: String,
     pub max_connections: usize,
+    pub disable_stats: bool,
     pub username: Option<String>,
     pub password: Option<String>,
     pub bypass_ips: Vec<String>,
@@ -47,6 +49,7 @@ impl Config {
             server: ServerConfig {
                 bind: options.bind,
                 max_connections: options.max_connections,
+                disable_stats: options.disable_stats,
             },
             auth: AuthConfig {
                 username,

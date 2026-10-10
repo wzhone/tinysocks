@@ -65,6 +65,9 @@ pub(crate) fn runtime_args(options: &RuntimeOptions) -> Result<Vec<String>> {
         args.push("--bypass-ip".to_string());
         args.push(options.bypass_ips.join(","));
     }
+    if options.disable_stats {
+        args.push("--disable-stats".to_string());
+    }
     Ok(args)
 }
 
@@ -84,6 +87,7 @@ mod tests {
         RuntimeOptions {
             bind: "0.0.0.0:1080".to_string(),
             max_connections: 2048,
+            disable_stats: false,
             username: Some("admin".to_string()),
             password: Some("secret".to_string()),
             bypass_ips: vec!["127.0.0.0/8".to_string(), "::1/128".to_string()],
@@ -109,5 +113,13 @@ mod tests {
                 "127.0.0.0/8,::1/128",
             ]
         );
+    }
+
+    #[test]
+    fn windows_service_args_preserve_disabled_stats() {
+        let mut options = sample_options();
+        options.disable_stats = true;
+        let args = windows_service_args(&options).expect("should build args");
+        assert_eq!(args.last().map(String::as_str), Some("--disable-stats"));
     }
 }
