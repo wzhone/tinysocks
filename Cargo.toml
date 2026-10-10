@@ -1,6 +1,6 @@
 [package]
 name = "tinysocks"
-version = "1.0.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 description = "A single-port SOCKS5 and HTTP proxy server with authentication, IP allowlists, IPv4/IPv6 support, and UDP ASSOCIATE support."
