@@ -1,19 +1,22 @@
 # TinySocks
 
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/wzhone/tinysocks/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wzhone/tinysocks/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/wzhone/tinysocks)](https://github.com/wzhone/tinysocks/releases/latest)
+
 [English](README.md) | [中文](README_zh.md) | [日本語](README_ja.md)
 
-TinySocks は、同じリスナーで SOCKS5 と HTTP プロキシリクエストを処理する単一ポートプロキシです。IPv4 / IPv6、ユーザー名/パスワード認証、IP/CIDR 許可リスト、SOCKS5 UDP ASSOCIATE をサポートします。
-
-実行時の統計は、組み込みの `/stats` ページで確認できます。
+TinySocks は単一ポートの SOCKS5 / HTTP プロキシです。
 
 ## TL;DR
 
+サンプルのパスワード `change-me` は自分のパスワードに置き換えてください。
+
 ```bash
-docker run --rm \
+docker run -d --name tinysocks --restart unless-stopped \
   -p 1080:1080 \
   -e TINYSOCKS_USERNAME=admin \
   -e TINYSOCKS_PASSWORD=change-me \
-  -e TINYSOCKS_BYPASS_IP=127.0.0.0/8,::1/128 \
   ghcr.io/wzhone/tinysocks:latest
 ```
 
@@ -29,87 +32,140 @@ docker run --rm \
 
 ## インストール
 
-[GitHub Releases](https://github.com/wzhone/tinysocks/releases) から対象プラットフォームのバイナリをダウンロードするか、Docker イメージを使用します。
+ビルド済みバイナリ：[GitHub Releases](https://github.com/wzhone/tinysocks/releases)（Linux / Windows x86_64）。
+
+### Linux x86_64 / systemd
+
+root 権限が必要です。
 
 ```bash
-docker pull ghcr.io/wzhone/tinysocks:latest
+curl -fLO https://github.com/wzhone/tinysocks/releases/latest/download/tinysocks-linux-x86_64.tar.gz &&
+tar -xzf tinysocks-linux-x86_64.tar.gz &&
+cd tinysocks-linux-x86_64 &&
+sudo ./tinysocks 0.0.0.0:1080 --username admin --password 'change-me' install
 ```
 
-ソースからビルド:
+### Windows x86_64
+
+[tinysocks-windows-x86_64.zip](https://github.com/wzhone/tinysocks/releases/latest/download/tinysocks-windows-x86_64.zip) をダウンロード・展開し、`tinysocks-windows-x86_64` で管理者 PowerShell を開きます：
+
+```powershell
+.\tinysocks.exe 0.0.0.0:1080 --username admin --password 'change-me' install
+```
+
+### ソースからビルド
 
 ```bash
+git clone https://github.com/wzhone/tinysocks.git
+cd tinysocks
 cargo build --release --locked
+cd target/release
 ```
 
-ソースからビルドするには Rust 1.96 以降が必要です。
+Rust 1.96+ が必要です。出力先は `target/release/tinysocks`（Windows：`tinysocks.exe`）です。
 
 ## 使い方
 
+クライアントで SOCKS5 または HTTP を選び、サーバーアドレス、ポート `1080`、設定したユーザー名とパスワードを入力します。
+
+リモートアクセスにはサーバーのファイアウォールで TCP `1080` を許可します。
+
+### コマンド形式
+
+```text
+tinysocks [OPTIONS] [BIND ADDR] [COMMAND]
+```
+
+| コマンド | 動作 |
+|---|---|
+| コマンドなし | フォアグラウンドで実行、Ctrl+C で停止 |
+| `install` | サービスをインストール・起動し、自動起動を設定 |
+| `uninstall` | サービスを停止・削除し、インストール済みファイルを削除 |
+| `help [COMMAND]` | ヘルプを表示 |
+
+```bash
+./tinysocks --help
+./tinysocks install --help
+```
+
 ### Docker
 
-コンテナはデフォルトで `tinysocks` を実行し、`0.0.0.0:1080` で待ち受けます。実行時オプションは環境変数で設定できます。また、イメージ名の後に CLI 引数を追加して上書きできます。
+コンテナは `0.0.0.0:1080` で待ち受けます。環境変数、またはイメージ名の後の CLI 引数で設定します。
 
-SOCKS5 UDP ASSOCIATE は、セッションごとに一時 UDP リレーポートを使用します。Docker で UDP ASSOCIATE を使用する場合は host network を使用してください。
+Docker で SOCKS5 UDP ASSOCIATE を使う場合は `-p 1080:1080` を `--network host` に置き換えます。
 
 ### バイナリ
 
 ```bash
-tinysocks 127.0.0.1:1080 \
+./tinysocks 127.0.0.1:1080 \
   --username admin \
-  --password change-me
+  --password 'change-me'
 ```
 
-クライアントは、同じアドレスとポートに SOCKS5 または HTTP プロキシプロトコルで接続できます。
+リモートアクセスには `0.0.0.0:1080`（IPv4）または `[::]:1080`（IPv6）を指定します。
+
+ローカルから認証なしで接続：
+
+```bash
+./tinysocks 127.0.0.1:1080 --bypass-ip '127.0.0.1,::1'
+```
 
 ## 統計
 
-ブラウザで `http://<proxy-host>:<proxy-port>/stats` を開くと、接続数とトラフィックカウンターを確認できます。認証が有効で、クライアント IP が許可リストに含まれていない場合は、プロキシと同じユーザー名とパスワードを使用してください。
+`http://<proxy-host>:<proxy-port>/stats` で接続数とトラフィック統計を確認できます。許可リスト外のクライアントはプロキシの認証情報でログインします。
+
+統計を無効にする場合（現在はソースビルドが必要）：
+
+```bash
+./tinysocks 127.0.0.1:1080 --username admin --password 'change-me' --disable-stats
+```
+
+`TINYSOCKS_DISABLE_STATS=true` でも設定できます。サービスのインストール時は `install` の前に `--disable-stats` を指定します。
 
 ## 設定
 
 | オプション | 環境変数 | デフォルト | 説明 |
 |---|---|---|---|
 | `[BIND ADDR]` | `TINYSOCKS_BIND` | `127.0.0.1:1080` | 待ち受けアドレスとポート |
-| `-m, --max-connections` | `TINYSOCKS_MAX_CONNECTIONS` | `1024` | グローバル同時接続数の上限 |
-| `-u, --username` | `TINYSOCKS_USERNAME` | - | プロキシユーザー名 |
-| `-p, --password` | `TINYSOCKS_PASSWORD` | - | プロキシパスワード |
-| `--bypass-ip` | `TINYSOCKS_BYPASS_IP` | - | 認証をスキップする IP または CIDR のカンマ区切りリスト |
+| `-m, --max-connections <NUM>` | `TINYSOCKS_MAX_CONNECTIONS` | `1024` | 同時接続数の上限、`1`–`1000000` |
+| `-u, --username <NAME>` | `TINYSOCKS_USERNAME` | - | プロキシユーザー名、パスワードと同時に設定 |
+| `-p, --password <PASSWORD>` | `TINYSOCKS_PASSWORD` | - | プロキシパスワード |
+| `--bypass-ip <IP_OR_CIDR>` | `TINYSOCKS_BYPASS_IP` | - | 認証を省略する IP / CIDR、カンマ区切り、指定は 1 回 |
+| `--disable-stats` | `TINYSOCKS_DISABLE_STATS` | `false` | 統計を無効にする |
+| `-h, --help` | - | - | コマンドヘルプを表示 |
+| `-V, --version` | - | - | プログラムのバージョンを表示 |
 
-CLI 引数は環境変数より優先されます。ユーザー名/パスワード認証、または少なくとも 1 つの `--bypass-ip` 許可リスト項目を設定してください。
+CLI 引数は環境変数より優先されます。ユーザー名とパスワード、または `--bypass-ip` の設定が必要です。
 
-## サービスインストール
-
-`install` と `uninstall` はホストサービスの管理に使用します。Linux systemd サービス名は `tinysocks`、Windows サービス名は `TinySocks` です。
+## サービス管理
 
 ### Linux systemd
 
 ```bash
-sudo tinysocks 0.0.0.0:1080 \
-  --username admin \
-  --password change-me \
-  install
+sudo systemctl status tinysocks --no-pager
+sudo journalctl -u tinysocks -n 50 --no-pager
 ```
 
-Linux では、`install` はサービス認証情報を `/etc/tinysocks/tinysocks.env` に `0600` 権限で保存し、systemd unit からその環境ファイルを参照します。
+`/etc/tinysocks/tinysocks.env` の認証情報を変更した後は再起動します：
+
+```bash
+sudo systemctl restart tinysocks
+```
 
 アンインストール:
 
 ```bash
-sudo tinysocks uninstall
+sudo /usr/local/bin/tinysocks uninstall
 ```
 
 ### Windows
 
-管理者ターミナルで実行します。
-
 ```powershell
-.\tinysocks.exe 0.0.0.0:1080 `
-  --username admin `
-  --password change-me `
-  install
+Get-Service TinySocks
+Restart-Service TinySocks
 ```
 
-アンインストール:
+展開先ディレクトリからアンインストール：
 
 ```powershell
 .\tinysocks.exe uninstall

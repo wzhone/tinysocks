@@ -50,7 +50,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          asset="tinysocks-${GITHUB_REF_NAME}-linux-x86_64"
+          asset="tinysocks-linux-x86_64"
           staging="dist/${asset}"
 
           mkdir -p "$staging"
@@ -145,7 +145,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $asset = "tinysocks-$env:GITHUB_REF_NAME-windows-x86_64"
+          $asset = "tinysocks-windows-x86_64"
           $staging = Join-Path "dist" $asset
 
           New-Item -ItemType Directory -Force -Path $staging | Out-Null

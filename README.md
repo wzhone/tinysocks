@@ -1,19 +1,22 @@
 # TinySocks
 
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/wzhone/tinysocks/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wzhone/tinysocks/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/wzhone/tinysocks)](https://github.com/wzhone/tinysocks/releases/latest)
+
 [English](README.md) | [中文](README_zh.md) | [日本語](README_ja.md)
 
-TinySocks is a single-port proxy that handles SOCKS5 and HTTP proxy requests on the same listener. It supports IPv4 / IPv6, username/password authentication, IP/CIDR allowlists, and SOCKS5 UDP ASSOCIATE.
-
-Runtime statistics are available from the built-in `/stats` page.
+TinySocks is a single-port SOCKS5 / HTTP proxy.
 
 ## TL;DR
 
+Replace the example password `change-me` with your own.
+
 ```bash
-docker run --rm \
+docker run -d --name tinysocks --restart unless-stopped \
   -p 1080:1080 \
   -e TINYSOCKS_USERNAME=admin \
   -e TINYSOCKS_PASSWORD=change-me \
-  -e TINYSOCKS_BYPASS_IP=127.0.0.0/8,::1/128 \
   ghcr.io/wzhone/tinysocks:latest
 ```
 
@@ -29,87 +32,140 @@ docker run --rm \
 
 ## Installation
 
-Download a binary for your platform from [GitHub Releases](https://github.com/wzhone/tinysocks/releases), or use the Docker image:
+Prebuilt binaries: [GitHub Releases](https://github.com/wzhone/tinysocks/releases) (Linux / Windows x86_64).
+
+### Linux x86_64 / systemd
+
+Requires root privileges.
 
 ```bash
-docker pull ghcr.io/wzhone/tinysocks:latest
+curl -fLO https://github.com/wzhone/tinysocks/releases/latest/download/tinysocks-linux-x86_64.tar.gz &&
+tar -xzf tinysocks-linux-x86_64.tar.gz &&
+cd tinysocks-linux-x86_64 &&
+sudo ./tinysocks 0.0.0.0:1080 --username admin --password 'change-me' install
 ```
 
-Build from source:
+### Windows x86_64
+
+Download [tinysocks-windows-x86_64.zip](https://github.com/wzhone/tinysocks/releases/latest/download/tinysocks-windows-x86_64.zip), extract it, and open an administrator PowerShell in `tinysocks-windows-x86_64`:
+
+```powershell
+.\tinysocks.exe 0.0.0.0:1080 --username admin --password 'change-me' install
+```
+
+### Build from source
 
 ```bash
+git clone https://github.com/wzhone/tinysocks.git
+cd tinysocks
 cargo build --release --locked
+cd target/release
 ```
 
-Building from source requires Rust 1.96 or newer.
+Requires Rust 1.96+. Output: `target/release/tinysocks` (`tinysocks.exe` on Windows).
 
 ## Usage
 
+In your client, select SOCKS5 or HTTP and enter the server address, port `1080`, and configured username and password.
+
+For remote access, allow TCP port `1080` in the server firewall.
+
+### Command line
+
+```text
+tinysocks [OPTIONS] [BIND ADDR] [COMMAND]
+```
+
+| Command | Behavior |
+|---|---|
+| No command | Run in the foreground; stop with Ctrl+C |
+| `install` | Install, start, and enable the service at boot |
+| `uninstall` | Stop and remove the service and installed files |
+| `help [COMMAND]` | Print help |
+
+```bash
+./tinysocks --help
+./tinysocks install --help
+```
+
 ### Docker
 
-The container runs `tinysocks` by default and listens on `0.0.0.0:1080`. Runtime options can be set with environment variables, or overridden by appending CLI arguments after the image name.
+The container listens on `0.0.0.0:1080`. Use environment variables or CLI arguments after the image name.
 
-SOCKS5 UDP ASSOCIATE uses an ephemeral UDP relay port per session. Use host networking when running UDP ASSOCIATE through Docker.
+For SOCKS5 UDP ASSOCIATE in Docker, replace `-p 1080:1080` with `--network host`.
 
 ### Binary
 
 ```bash
-tinysocks 127.0.0.1:1080 \
+./tinysocks 127.0.0.1:1080 \
   --username admin \
-  --password change-me
+  --password 'change-me'
 ```
 
-Clients can connect to the same address and port with either SOCKS5 or HTTP proxy protocol.
+For remote access, bind to `0.0.0.0:1080` (IPv4) or `[::]:1080` (IPv6).
+
+Local access without credentials:
+
+```bash
+./tinysocks 127.0.0.1:1080 --bypass-ip '127.0.0.1,::1'
+```
 
 ## Statistics
 
-Open http://<proxy-host>:<proxy-port>/stats in your browser to view connection and traffic counters. If your client IP is not allowlisted, use the same username and password configured for the proxy.
+Open `http://<proxy-host>:<proxy-port>/stats` for connection and traffic statistics. Clients outside the allowlist log in with the proxy credentials.
+
+Disable statistics (currently requires a source build):
+
+```bash
+./tinysocks 127.0.0.1:1080 --username admin --password 'change-me' --disable-stats
+```
+
+Or set `TINYSOCKS_DISABLE_STATS=true`. For service installation, put `--disable-stats` before `install`.
 
 ## Configuration
 
 | Option | Environment variable | Default | Description |
 |---|---|---|---|
 | `[BIND ADDR]` | `TINYSOCKS_BIND` | `127.0.0.1:1080` | Listen address and port |
-| `-m, --max-connections` | `TINYSOCKS_MAX_CONNECTIONS` | `1024` | Global concurrent connection limit |
-| `-u, --username` | `TINYSOCKS_USERNAME` | - | Proxy username |
-| `-p, --password` | `TINYSOCKS_PASSWORD` | - | Proxy password |
-| `--bypass-ip` | `TINYSOCKS_BYPASS_IP` | - | Comma-separated IPs or CIDRs that skip authentication |
+| `-m, --max-connections <NUM>` | `TINYSOCKS_MAX_CONNECTIONS` | `1024` | Concurrent connection limit, `1`–`1000000` |
+| `-u, --username <NAME>` | `TINYSOCKS_USERNAME` | - | Proxy username; set with the password |
+| `-p, --password <PASSWORD>` | `TINYSOCKS_PASSWORD` | - | Proxy password |
+| `--bypass-ip <IP_OR_CIDR>` | `TINYSOCKS_BYPASS_IP` | - | IPs / CIDRs exempt from authentication; comma-separated, pass once |
+| `--disable-stats` | `TINYSOCKS_DISABLE_STATS` | `false` | Disable statistics |
+| `-h, --help` | - | - | Print command help |
+| `-V, --version` | - | - | Print the program version |
 
-CLI arguments take precedence over environment variables. Configure username/password authentication, or at least one `--bypass-ip` allowlist entry.
+CLI arguments override environment variables. Configure a username and password, or `--bypass-ip`.
 
-## Service Installation
-
-`install` and `uninstall` manage host services. The Linux systemd service is named `tinysocks`; the Windows service is named `TinySocks`.
+## Service Management
 
 ### Linux systemd
 
 ```bash
-sudo tinysocks 0.0.0.0:1080 \
-  --username admin \
-  --password change-me \
-  install
+sudo systemctl status tinysocks --no-pager
+sudo journalctl -u tinysocks -n 50 --no-pager
 ```
 
-On Linux, `install` stores service credentials in `/etc/tinysocks/tinysocks.env` with `0600` permissions and references that file from the systemd unit.
+After editing credentials in `/etc/tinysocks/tinysocks.env`, restart:
+
+```bash
+sudo systemctl restart tinysocks
+```
 
 Uninstall:
 
 ```bash
-sudo tinysocks uninstall
+sudo /usr/local/bin/tinysocks uninstall
 ```
 
 ### Windows
 
-Run from an administrator terminal:
-
 ```powershell
-.\tinysocks.exe 0.0.0.0:1080 `
-  --username admin `
-  --password change-me `
-  install
+Get-Service TinySocks
+Restart-Service TinySocks
 ```
 
-Uninstall:
+Uninstall from the extracted directory:
 
 ```powershell
 .\tinysocks.exe uninstall
