@@ -15,8 +15,8 @@ Replace the example password `change-me` with your own.
 ```bash
 docker run -d --name tinysocks --restart unless-stopped \
   -p 1080:1080 \
-  -e TINYSOCKS_USERNAME=admin \
-  -e TINYSOCKS_PASSWORD=change-me \
+  -e PROXY_USERNAME=admin \
+  -e PROXY_PASSWORD=change-me \
   ghcr.io/wzhone/tinysocks:latest
 ```
 
@@ -120,22 +120,24 @@ Disable statistics (currently requires a source build):
 ./tinysocks 127.0.0.1:1080 --username admin --password 'change-me' --disable-stats
 ```
 
-Or set `TINYSOCKS_DISABLE_STATS=true`. For service installation, put `--disable-stats` before `install`.
+Or set `PROXY_DISABLE_STATS=true`. For service installation, put `--disable-stats` before `install`.
 
 ## Configuration
 
 | Option | Environment variable | Default | Description |
 |---|---|---|---|
-| `[BIND ADDR]` | `TINYSOCKS_BIND` | `127.0.0.1:1080` | Listen address and port |
-| `-m, --max-connections <NUM>` | `TINYSOCKS_MAX_CONNECTIONS` | `1024` | Concurrent connection limit, `1`–`1000000` |
-| `-u, --username <NAME>` | `TINYSOCKS_USERNAME` | - | Proxy username; set with the password |
-| `-p, --password <PASSWORD>` | `TINYSOCKS_PASSWORD` | - | Proxy password |
-| `--bypass-ip <IP_OR_CIDR>` | `TINYSOCKS_BYPASS_IP` | - | IPs / CIDRs exempt from authentication; comma-separated, pass once |
-| `--disable-stats` | `TINYSOCKS_DISABLE_STATS` | `false` | Disable statistics |
+| `[BIND ADDR]` | `PROXY_BIND` | `127.0.0.1:1080` | Listen address and port |
+| `-m, --max-connections <NUM>` | `PROXY_MAX_CONNECTIONS` | `1024` | Concurrent connection limit, `1`–`1000000` |
+| `-u, --username <NAME>` | `PROXY_USERNAME` | - | Proxy username; set with the password |
+| `-p, --password <PASSWORD>` | `PROXY_PASSWORD` | - | Proxy password |
+| `--bypass-ip <IP_OR_CIDR>` | `PROXY_BYPASS_IP` | - | IPs / CIDRs exempt from authentication; comma-separated, pass once |
+| `--disable-stats` | `PROXY_DISABLE_STATS` | `false` | Disable statistics |
 | `-h, --help` | - | - | Print command help |
 | `-V, --version` | - | - | Print the program version |
 
 CLI arguments override environment variables. Configure a username and password, or `--bypass-ip`.
+
+When upgrading from a version using `TINYSOCKS_` runtime variables, rename them to `PROXY_` in deployment configuration and `/etc/tinysocks/tinysocks.env`; the old names are no longer read.
 
 ## Service Management
 

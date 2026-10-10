@@ -15,8 +15,8 @@ TinySocks は単一ポートの SOCKS5 / HTTP プロキシです。
 ```bash
 docker run -d --name tinysocks --restart unless-stopped \
   -p 1080:1080 \
-  -e TINYSOCKS_USERNAME=admin \
-  -e TINYSOCKS_PASSWORD=change-me \
+  -e PROXY_USERNAME=admin \
+  -e PROXY_PASSWORD=change-me \
   ghcr.io/wzhone/tinysocks:latest
 ```
 
@@ -120,22 +120,24 @@ Docker で SOCKS5 UDP ASSOCIATE を使う場合は `-p 1080:1080` を `--network
 ./tinysocks 127.0.0.1:1080 --username admin --password 'change-me' --disable-stats
 ```
 
-`TINYSOCKS_DISABLE_STATS=true` でも設定できます。サービスのインストール時は `install` の前に `--disable-stats` を指定します。
+`PROXY_DISABLE_STATS=true` でも設定できます。サービスのインストール時は `install` の前に `--disable-stats` を指定します。
 
 ## 設定
 
 | オプション | 環境変数 | デフォルト | 説明 |
 |---|---|---|---|
-| `[BIND ADDR]` | `TINYSOCKS_BIND` | `127.0.0.1:1080` | 待ち受けアドレスとポート |
-| `-m, --max-connections <NUM>` | `TINYSOCKS_MAX_CONNECTIONS` | `1024` | 同時接続数の上限、`1`–`1000000` |
-| `-u, --username <NAME>` | `TINYSOCKS_USERNAME` | - | プロキシユーザー名、パスワードと同時に設定 |
-| `-p, --password <PASSWORD>` | `TINYSOCKS_PASSWORD` | - | プロキシパスワード |
-| `--bypass-ip <IP_OR_CIDR>` | `TINYSOCKS_BYPASS_IP` | - | 認証を省略する IP / CIDR、カンマ区切り、指定は 1 回 |
-| `--disable-stats` | `TINYSOCKS_DISABLE_STATS` | `false` | 統計を無効にする |
+| `[BIND ADDR]` | `PROXY_BIND` | `127.0.0.1:1080` | 待ち受けアドレスとポート |
+| `-m, --max-connections <NUM>` | `PROXY_MAX_CONNECTIONS` | `1024` | 同時接続数の上限、`1`–`1000000` |
+| `-u, --username <NAME>` | `PROXY_USERNAME` | - | プロキシユーザー名、パスワードと同時に設定 |
+| `-p, --password <PASSWORD>` | `PROXY_PASSWORD` | - | プロキシパスワード |
+| `--bypass-ip <IP_OR_CIDR>` | `PROXY_BYPASS_IP` | - | 認証を省略する IP / CIDR、カンマ区切り、指定は 1 回 |
+| `--disable-stats` | `PROXY_DISABLE_STATS` | `false` | 統計を無効にする |
 | `-h, --help` | - | - | コマンドヘルプを表示 |
 | `-V, --version` | - | - | プログラムのバージョンを表示 |
 
 CLI 引数は環境変数より優先されます。ユーザー名とパスワード、または `--bypass-ip` の設定が必要です。
+
+`TINYSOCKS_` の実行時変数を使うバージョンから更新する場合は、デプロイ設定と `/etc/tinysocks/tinysocks.env` の接頭辞を `PROXY_` に変更してください。旧名は読み込まれません。
 
 ## サービス管理
 

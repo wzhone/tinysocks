@@ -15,8 +15,8 @@ TinySocks 是一个单端口 SOCKS5 / HTTP 代理。
 ```bash
 docker run -d --name tinysocks --restart unless-stopped \
   -p 1080:1080 \
-  -e TINYSOCKS_USERNAME=admin \
-  -e TINYSOCKS_PASSWORD=change-me \
+  -e PROXY_USERNAME=admin \
+  -e PROXY_PASSWORD=change-me \
   ghcr.io/wzhone/tinysocks:latest
 ```
 
@@ -118,22 +118,24 @@ Docker 使用 SOCKS5 UDP ASSOCIATE 时，将 `-p 1080:1080` 替换为 `--network
 ./tinysocks 127.0.0.1:1080 --username admin --password 'change-me' --disable-stats
 ```
 
-也可设置 `TINYSOCKS_DISABLE_STATS=true`。安装服务时，将 `--disable-stats` 放在 `install` 前。
+也可设置 `PROXY_DISABLE_STATS=true`。安装服务时，将 `--disable-stats` 放在 `install` 前。
 
 ## 配置
 
 | 参数 | 环境变量 | 默认值 | 说明 |
 |---|---|---|---|
-| `[BIND ADDR]` | `TINYSOCKS_BIND` | `127.0.0.1:1080` | 监听地址和端口 |
-| `-m, --max-connections <NUM>` | `TINYSOCKS_MAX_CONNECTIONS` | `1024` | 并发连接上限，`1`–`1000000` |
-| `-u, --username <NAME>` | `TINYSOCKS_USERNAME` | - | 代理用户名，与密码同时配置 |
-| `-p, --password <PASSWORD>` | `TINYSOCKS_PASSWORD` | - | 代理密码 |
-| `--bypass-ip <IP_OR_CIDR>` | `TINYSOCKS_BYPASS_IP` | - | 免认证 IP / CIDR，逗号分隔，只能传一次 |
-| `--disable-stats` | `TINYSOCKS_DISABLE_STATS` | `false` | 关闭统计 |
+| `[BIND ADDR]` | `PROXY_BIND` | `127.0.0.1:1080` | 监听地址和端口 |
+| `-m, --max-connections <NUM>` | `PROXY_MAX_CONNECTIONS` | `1024` | 并发连接上限，`1`–`1000000` |
+| `-u, --username <NAME>` | `PROXY_USERNAME` | - | 代理用户名，与密码同时配置 |
+| `-p, --password <PASSWORD>` | `PROXY_PASSWORD` | - | 代理密码 |
+| `--bypass-ip <IP_OR_CIDR>` | `PROXY_BYPASS_IP` | - | 免认证 IP / CIDR，逗号分隔，只能传一次 |
+| `--disable-stats` | `PROXY_DISABLE_STATS` | `false` | 关闭统计 |
 | `-h, --help` | - | - | 显示命令帮助 |
 | `-V, --version` | - | - | 显示程序版本 |
 
 CLI 参数优先于环境变量。必须配置用户名和密码，或 `--bypass-ip`。
+
+从使用 `TINYSOCKS_` 运行变量的版本升级时，请将部署配置及 `/etc/tinysocks/tinysocks.env` 中的变量前缀改为 `PROXY_`；旧名称不再读取。
 
 ## 服务管理
 

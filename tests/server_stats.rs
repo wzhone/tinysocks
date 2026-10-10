@@ -52,13 +52,13 @@ async fn stats_toggle_preserves_authentication_and_proxy_forwarding() {
                 "--password",
                 "pass",
             ])
-            .env_remove("TINYSOCKS_DISABLE_STATS")
-            .env_remove("TINYSOCKS_BYPASS_IP")
-            .env_remove("TINYSOCKS_MAX_CONNECTIONS")
+            .env_remove("PROXY_DISABLE_STATS")
+            .env_remove("PROXY_BYPASS_IP")
+            .env_remove("PROXY_MAX_CONNECTIONS")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         if let Some(value) = environment {
-            command.env("TINYSOCKS_DISABLE_STATS", value);
+            command.env("PROXY_DISABLE_STATS", value);
         }
         if flag {
             command.arg("--disable-stats");

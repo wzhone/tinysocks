@@ -68,7 +68,7 @@ fn build_env_file(options: &RuntimeOptions) -> Result<Option<String>> {
     };
 
     Ok(Some(format!(
-        "TINYSOCKS_USERNAME={}\nTINYSOCKS_PASSWORD={}\n",
+        "PROXY_USERNAME={}\nPROXY_PASSWORD={}\n",
         quote_env_value(username)?,
         quote_env_value(password)?
     )))
@@ -340,7 +340,7 @@ mod tests {
 
         assert_eq!(
             env,
-            "TINYSOCKS_USERNAME=\"admin\"\nTINYSOCKS_PASSWORD=\"quote\\\"slash\\\\\"\n"
+            "PROXY_USERNAME=\"admin\"\nPROXY_PASSWORD=\"quote\\\"slash\\\\\"\n"
         );
     }
 

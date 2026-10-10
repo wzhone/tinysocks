@@ -17,7 +17,7 @@ pub struct Cli {
         global = true,
         value_name = "BIND ADDR",
         default_value = DEFAULT_BIND,
-        env = "TINYSOCKS_BIND"
+        env = "PROXY_BIND"
     )]
     bind: String,
 
@@ -27,14 +27,14 @@ pub struct Cli {
         global = true,
         value_name = "NUM",
         default_value_t = DEFAULT_MAX_CONNECTIONS,
-        env = "TINYSOCKS_MAX_CONNECTIONS"
+        env = "PROXY_MAX_CONNECTIONS"
     )]
     max_connections: usize,
 
     #[arg(
         long,
         global = true,
-        env = "TINYSOCKS_DISABLE_STATS",
+        env = "PROXY_DISABLE_STATS",
         help = "Disable statistics collection and the /stats page"
     )]
     disable_stats: bool,
@@ -44,7 +44,7 @@ pub struct Cli {
         long,
         global = true,
         value_name = "NAME",
-        env = "TINYSOCKS_USERNAME"
+        env = "PROXY_USERNAME"
     )]
     username: Option<String>,
 
@@ -53,7 +53,7 @@ pub struct Cli {
         long,
         global = true,
         value_name = "PASSWORD",
-        env = "TINYSOCKS_PASSWORD"
+        env = "PROXY_PASSWORD"
     )]
     password: Option<String>,
 
@@ -63,7 +63,7 @@ pub struct Cli {
         value_name = "IP_OR_CIDR",
         action = ArgAction::Set,
         value_delimiter = ',',
-        env = "TINYSOCKS_BYPASS_IP"
+        env = "PROXY_BYPASS_IP"
     )]
     bypass_ips: Vec<String>,
 
