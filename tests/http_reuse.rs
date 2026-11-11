@@ -24,6 +24,7 @@ use tokio::{
 type Observations = Arc<Mutex<Vec<(&'static str, String, bool, Bytes)>>>;
 
 async fn serve_upstream(listener: TcpListener, label: &'static str, seen: Observations) {
+    let authority = listener.local_addr().unwrap();
     loop {
         let (stream, _) = listener.accept().await.unwrap();
         let seen = seen.clone();
@@ -34,6 +35,10 @@ async fn serve_upstream(listener: TcpListener, label: &'static str, seen: Observ
                     service_fn(|req: Request<Incoming>| {
                         let seen = seen.clone();
                         async move {
+                            assert_eq!(
+                                req.headers()["host"].as_bytes(),
+                                authority.to_string().as_bytes()
+                            );
                             let path = req.uri().to_string();
                             let leaked = req.headers().contains_key("proxy-authorization");
                             let body = req.into_body().collect().await.unwrap().to_bytes();
@@ -100,6 +105,7 @@ async fn reused_connections_route_authenticate_and_frame_each_request() {
         for (framing, body) in [
             ("Content-Length: 4\r\n", "PING"),
             ("Transfer-Encoding: chunked\r\n", "4\r\nPING\r\n0\r\n\r\n"),
+            ("Content-Length: 4\r\nConnection: Content-Length\r\n", "PING"),
         ] {
             client.write_all(format!(
                 "POST http://{a_addr}/first HTTP/1.1\r\nHost: {a_addr}\r\n{auth}{framing}\r\n{body}GET http://{b_addr}/second HTTP/1.1\r\nHost: {b_addr}\r\n{auth}\r\n"
@@ -125,14 +131,26 @@ async fn reused_connections_route_authenticate_and_frame_each_request() {
         assert_eq!(read_response(&mut client, 200).await, b"A");
         drop(client);
 
+        for framing in ["Content-Length: 4\r\nContent-Length: 5\r\n", "Content-Length: +4\r\n"] {
+            let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            client.write_all(format!("POST http://{a_addr}/invalid HTTP/1.1\r\nHost: {a_addr}\r\n{auth}{framing}\r\nPING").as_bytes()).await.unwrap();
+            assert!(read_response(&mut client, 400).await.is_empty());
+        }
+
+        let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        client.write_all(format!("GET http://{a_addr}?token=1 HTTP/1.1\r\nHost: {b_addr}\r\n{auth}\r\n").as_bytes()).await.unwrap();
+        assert_eq!(read_response(&mut client, 200).await, b"A");
+        drop(client);
+
         let observations = seen.lock().unwrap().clone();
-        assert_eq!(observations.len(), 7);
+        assert_eq!(observations.len(), 10);
         assert!(observations.iter().all(|(_, _, leaked, _)| !leaked));
-        for pair in observations[..4].as_chunks::<2>().0 {
+        for pair in observations[..6].as_chunks::<2>().0 {
             assert_eq!((&pair[0].0, pair[0].1.as_str(), pair[0].3.as_ref()), (&"A", "/first", b"PING".as_slice()));
             assert_eq!((&pair[1].0, pair[1].1.as_str(), pair[1].3.as_ref()), (&"B", "/second", b"".as_slice()));
         }
         assert!(observations.iter().all(|(_, path, _, _)| path != "/denied"));
+        assert_eq!(observations.last().unwrap().1, "/?token=1");
 
         let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let target_addr = target.local_addr().unwrap();
