@@ -57,6 +57,23 @@ impl ProxyServer {
         })
     }
 
+    async fn accept(
+        &self,
+        listener: &TcpListener,
+    ) -> (tokio::net::TcpStream, std::net::SocketAddr) {
+        loop {
+            match listener.accept().await {
+                Ok(connection) => return connection,
+                Err(err) => {
+                    let message = format!("listener accept failed: {err}");
+                    println!("{message}");
+                    self.stats.record_error(message);
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+            }
+        }
+    }
+
     /// Run the proxy accept loop until shutdown is requested.
     pub async fn run(&self, mut shutdown: Option<watch::Receiver<bool>>) -> Result<()> {
         let listener = TcpListener::bind(&self.bind)
@@ -73,10 +90,10 @@ impl ProxyServer {
         loop {
             let (mut stream, peer) = match shutdown.as_mut() {
                 Some(shutdown_rx) => tokio::select! {
-                    res = listener.accept() => res?,
+                    res = self.accept(&listener) => res,
                     _ = shutdown_rx.changed() => break,
                 },
-                None => listener.accept().await?,
+                None => self.accept(&listener).await,
             };
 
             let Ok(permit) = limiter.clone().try_acquire_owned() else {
