@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{Duration, timeout};
 
-const IO_TIMEOUT: Duration = Duration::from_secs(180);
+pub(crate) const IO_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Build a consistent timeout error message.
 fn timeout_message(action: &str) -> String {

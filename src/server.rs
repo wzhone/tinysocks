@@ -180,7 +180,7 @@ impl ProxyServer {
                         }
                         ProxyProtocol::Http => {
                             handle_http_proxy(
-                                &mut stream,
+                                stream,
                                 bypass_auth,
                                 &auth_cfg,
                                 COPY_BUFFER,

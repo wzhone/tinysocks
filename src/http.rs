@@ -1,25 +1,36 @@
-//! Minimal HTTP proxy handling.
+//! HTTP proxy handling with per-request authentication and routing.
 //!
-//! `httparse` reads raw HTTP/1.x request headers from the TCP stream. URI and
-//! authority parsing is delegated to the `http` crate so IPv6, default ports,
-//! and path/query handling follow a well-tested parser.
+//! Hyper owns HTTP/1 message boundaries; CONNECT switches to a byte tunnel.
 
 use anyhow::{Context, Result, anyhow, bail};
-use http::uri::Authority;
-use std::{collections::hash_map::RandomState, hash::BuildHasher};
-use tokio::io::copy_bidirectional_with_sizes;
+use http::{HeaderMap, HeaderValue, Request, Response, StatusCode, uri::Authority};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
+use hyper::{
+    body::{Bytes, Incoming},
+    service::service_fn,
+};
+use hyper_util::rt::{TokioIo, TokioTimer};
+use std::{
+    collections::hash_map::RandomState,
+    hash::BuildHasher,
+    pin::Pin,
+    sync::Mutex,
+    task::{Context as TaskContext, Poll},
+};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, copy_bidirectional_with_sizes};
 use tokio::net::TcpStream;
 
 use crate::{
     auth::http_basic_authorized,
     config::AuthConfig,
-    io_timeout::{flush_with_timeout, read_with_timeout, write_all_with_timeout},
+    io_timeout::{IO_TIMEOUT, write_all_with_timeout},
     protocol::PrefixedStream,
     stats::Stats,
 };
 
 const MAX_HEADER_SIZE: usize = 64 * 1024;
 const MAX_HEADERS: usize = 128;
+type ProxyBody = BoxBody<Bytes, hyper::Error>;
 
 pub struct HttpListener {
     port: u16,
@@ -39,14 +50,12 @@ impl HttpListener {
 struct HttpRequest {
     method: String,
     target: String,
-    version: String,
     headers: Vec<(String, String)>,
-    body_start: Vec<u8>,
 }
 
-/// Handle one HTTP proxy or stats-page request.
+/// Serve HTTP requests, retaining the connection permit for CONNECT tunnels.
 pub async fn handle_http_proxy(
-    stream: &mut PrefixedStream,
+    stream: PrefixedStream,
     bypass_auth: bool,
     auth: &AuthConfig,
     copy_buf_size: usize,
@@ -54,106 +63,247 @@ pub async fn handle_http_proxy(
     listener: &HttpListener,
     peer: std::net::SocketAddr,
 ) -> Result<()> {
-    let mut req = read_http_request(stream).await?;
+    let tunnel = Mutex::new(None);
+    let parts = hyper::server::conn::http1::Builder::new()
+        .max_buf_size(MAX_HEADER_SIZE)
+        .max_headers(MAX_HEADERS)
+        .timer(TokioTimer::new())
+        .header_read_timeout(IO_TIMEOUT)
+        .serve_connection(
+            TokioIo::new(stream),
+            service_fn(|req| {
+                handle_request(req, bypass_auth, auth, stats, listener, peer, &tunnel)
+            }),
+        )
+        .without_shutdown()
+        .await
+        .context("HttpError::ConnectionFailed")?;
 
-    if has_proxy_via(&req.headers, &listener.via) {
+    let outbound = tunnel
+        .lock()
+        .map_err(|_| anyhow!("HTTP tunnel lock poisoned"))?
+        .take();
+    if let Some(mut outbound) = outbound {
+        let mut stream = parts.io.into_inner();
+        // Hyper 预读的 TLS 数据仍属于隧道，必须先于后续 socket 数据转发。
         write_all_with_timeout(
-            stream,
-            b"HTTP/1.1 508 Loop Detected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            "HTTP loop response write",
+            &mut outbound,
+            &parts.read_buf,
+            "HTTP CONNECT upstream pre-write",
         )
         .await?;
-        return Ok(());
+        stats.add_tcp_bytes(parts.read_buf.len() as u64, 0);
+        let (up, down) =
+            copy_bidirectional_with_sizes(&mut stream, &mut outbound, copy_buf_size, copy_buf_size)
+                .await
+                .inspect_err(|err| {
+                    stats.inc_relay_failures();
+                    stats.record_error(format!("HTTP CONNECT relay failed from {peer}: {err}"));
+                })
+                .context("HttpError::RelayFailed")?;
+        stats.add_tcp_bytes(up, down);
     }
+    Ok(())
+}
 
-    if stats.is_enabled() && is_stats_request(&req, listener.port) {
-        if !bypass_auth && !stats_authorized(&req, auth) {
+async fn handle_request(
+    mut req: Request<Incoming>,
+    bypass_auth: bool,
+    auth: &AuthConfig,
+    stats: &Stats,
+    listener: &HttpListener,
+    peer: std::net::SocketAddr,
+    tunnel: &Mutex<Option<TcpStream>>,
+) -> Result<Response<ProxyBody>> {
+    let head = HttpRequest {
+        method: req.method().to_string(),
+        target: req.uri().to_string(),
+        headers: header_pairs(req.headers())?,
+    };
+    validate_message_framing(&head.headers)?;
+
+    if has_proxy_via(&head.headers, &listener.via) {
+        return Ok(local_response(StatusCode::LOOP_DETECTED, ""));
+    }
+    if stats.is_enabled() && is_stats_request(&head, listener.port) {
+        if !bypass_auth && !stats_authorized(&head, auth) {
             stats.inc_auth_failures();
             stats.record_error(format!("stats page authentication failed from {peer}"));
-            send_stats_auth_required(stream).await?;
-            return Ok(());
+            let mut response = local_response(StatusCode::UNAUTHORIZED, "");
+            response.headers_mut().insert(
+                "www-authenticate",
+                HeaderValue::from_static("Basic realm=\"tinysocks stats\""),
+            );
+            return Ok(response);
         }
-        return serve_stats_page(stream, stats).await;
+        let mut response = local_response(StatusCode::OK, stats.render_html());
+        response.headers_mut().insert(
+            "content-type",
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+        response
+            .headers_mut()
+            .insert("cache-control", HeaderValue::from_static("no-store"));
+        return Ok(response);
     }
-
-    if !bypass_auth && !http_basic_authorized(get_header(&req.headers, "proxy-authorization"), auth)
+    if !bypass_auth
+        && !http_basic_authorized(get_header(&head.headers, "proxy-authorization"), auth)
     {
         stats.inc_auth_failures();
         stats.record_error(format!("HTTP proxy authentication failed from {peer}"));
-        send_proxy_auth_required(stream).await?;
-        return Ok(());
+        let mut response = local_response(StatusCode::PROXY_AUTHENTICATION_REQUIRED, "");
+        response.headers_mut().insert(
+            "proxy-authenticate",
+            HeaderValue::from_static("Basic realm=\"proxy\""),
+        );
+        return Ok(response);
     }
 
-    if req.method.eq_ignore_ascii_case("CONNECT") {
-        handle_connect(stream, &req, copy_buf_size, stats, peer).await
+    let (host, port, path) = if req.method() == http::Method::CONNECT {
+        let (host, port) = parse_connect_target(&head.target)?;
+        (host, port, String::new())
     } else {
-        handle_forward(stream, &mut req, copy_buf_size, stats, peer, &listener.via).await
+        split_target(&head.target, get_header(&head.headers, "host"), 80)?
+    };
+    let target = format_target_endpoint(&host, port);
+    let outbound = TcpStream::connect(&target)
+        .await
+        .inspect_err(|err| {
+            stats.inc_connect_failures();
+            stats.record_error(format!("HTTP connect {target} failed from {peer}: {err}"));
+        })
+        .context("HttpError::ConnectFailed")?;
+    let _ = outbound.set_nodelay(true);
+
+    if req.method() == http::Method::CONNECT {
+        *tunnel
+            .lock()
+            .map_err(|_| anyhow!("HTTP tunnel lock poisoned"))? = Some(outbound);
+        return Ok(Response::new(ProxyBody::default()));
+    }
+
+    strip_forward_headers(req.headers_mut());
+    req.headers_mut()
+        .insert("host", format_host_header(&host, port, 80).parse()?);
+    let via = format!("{:?} {}", req.version(), listener.via);
+    req.headers_mut().append("via", via.parse()?);
+    *req.uri_mut() = path.parse()?;
+
+    let (mut sender, connection) =
+        hyper::client::conn::http1::handshake(TokioIo::new(HttpStatsStream {
+            stream: outbound,
+            stats: stats.clone(),
+        }))
+        .await?;
+    let relay_stats = stats.clone();
+    tokio::spawn(async move {
+        if let Err(err) = connection.await {
+            relay_stats.inc_relay_failures();
+            relay_stats.record_error(format!(
+                "HTTP forward relay {target} failed from {peer}: {err}"
+            ));
+        }
+    });
+    let mut response = sender
+        .send_request(req)
+        .await
+        .context("HttpError::RelayFailed")?;
+    strip_forward_headers(response.headers_mut());
+    Ok(response.map(BodyExt::boxed))
+}
+
+fn local_response(status: StatusCode, body: impl Into<Bytes>) -> Response<ProxyBody> {
+    let mut response = Response::new(Full::new(body.into()).map_err(|err| match err {}).boxed());
+    *response.status_mut() = status;
+    response
+        .headers_mut()
+        .insert("connection", HeaderValue::from_static("close"));
+    response
+}
+
+fn header_pairs(headers: &HeaderMap) -> Result<Vec<(String, String)>> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            Ok((
+                name.to_string(),
+                std::str::from_utf8(value.as_bytes())
+                    .context("HttpError::InvalidHeaderUtf8")?
+                    .trim()
+                    .to_string(),
+            ))
+        })
+        .collect()
+}
+
+fn strip_forward_headers(headers: &mut HeaderMap) {
+    let connection_headers = connection_header_names(
+        headers
+            .iter()
+            .filter_map(|(name, value)| Some((name.as_str(), value.to_str().ok()?))),
+    );
+    let remove: Vec<_> = headers
+        .keys()
+        .filter(|name| {
+            // Hyper 已解码正文，由出站 HTTP 连接重新生成 Transfer-Encoding。
+            should_drop_forward_header(name.as_str(), &connection_headers)
+                || name.as_str().eq_ignore_ascii_case("transfer-encoding")
+        })
+        .cloned()
+        .collect();
+    for name in remove {
+        headers.remove(name);
     }
 }
 
-/// Read and parse one HTTP request header block.
-async fn read_http_request(stream: &mut PrefixedStream) -> Result<HttpRequest> {
-    let mut buf = Vec::with_capacity(4096);
-    loop {
-        let mut chunk = [0u8; 1024];
-        let n = read_with_timeout(stream, &mut chunk, "HTTP request header read").await?;
-        if n == 0 {
-            bail!("HttpError::UnexpectedEof");
-        }
-        buf.extend_from_slice(&chunk[..n]);
-        if buf.len() > MAX_HEADER_SIZE {
-            bail!("HttpError::HeaderTooLarge");
-        }
+struct HttpStatsStream {
+    stream: TcpStream,
+    stats: Stats,
+}
 
-        let mut raw_headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
-        let mut parsed = httparse::Request::new(&mut raw_headers);
-        match parsed.parse(&buf) {
-            Ok(httparse::Status::Complete(header_end)) => {
-                let method = parsed
-                    .method
-                    .ok_or_else(|| anyhow!("HttpError::BadRequest"))?
-                    .to_string();
-                let target = parsed
-                    .path
-                    .ok_or_else(|| anyhow!("HttpError::BadRequest"))?
-                    .to_string();
-                let version = match parsed.version {
-                    Some(1) => "HTTP/1.1".to_string(),
-                    Some(0) => "HTTP/1.0".to_string(),
-                    _ => bail!("HttpError::BadRequest"),
-                };
-
-                let mut headers = Vec::with_capacity(parsed.headers.len());
-                for header in parsed.headers.iter() {
-                    let value = std::str::from_utf8(header.value)
-                        .context("HttpError::InvalidHeaderUtf8")?
-                        .trim()
-                        .to_string();
-                    headers.push((header.name.trim().to_string(), value));
-                }
-                validate_message_framing(&headers)?;
-
-                let body_start = buf[header_end..].to_vec();
-                return Ok(HttpRequest {
-                    method,
-                    target,
-                    version,
-                    headers,
-                    body_start,
-                });
-            }
-            Ok(httparse::Status::Partial) => continue,
-            Err(httparse::Error::TooManyHeaders) => bail!("HttpError::TooManyHeaders"),
-            Err(_) => bail!("HttpError::BadRequest"),
+impl AsyncRead for HttpStatsStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let result = Pin::new(&mut self.stream).poll_read(cx, buf);
+        if let Poll::Ready(Ok(())) = result {
+            self.stats
+                .add_tcp_bytes(0, (buf.filled().len() - before) as u64);
         }
+        result
+    }
+}
+
+impl AsyncWrite for HttpStatsStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let result = Pin::new(&mut self.stream).poll_write(cx, buf);
+        if let Poll::Ready(Ok(n)) = result {
+            self.stats.add_tcp_bytes(n as u64, 0);
+        }
+        result
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 }
 
 /// Reject ambiguous HTTP request body framing.
 fn validate_message_framing(headers: &[(String, String)]) -> Result<()> {
-    // This proxy streams bodies without fully decoding HTTP framing. Rejecting
-    // ambiguous framing at the edge avoids forwarding requests that different
-    // upstream servers could interpret differently.
     let mut content_length: Option<u64> = None;
     let mut has_chunked_transfer_encoding = false;
 
@@ -248,184 +398,9 @@ fn stats_authorized(req: &HttpRequest, auth: &AuthConfig) -> bool {
         || http_basic_authorized(get_header(&req.headers, "proxy-authorization"), auth)
 }
 
-/// Send a browser-friendly stats authentication challenge.
-async fn send_stats_auth_required(stream: &mut PrefixedStream) -> Result<()> {
-    write_all_with_timeout(
-        stream,
-        b"HTTP/1.1 401 Unauthorized\r\n\
-          WWW-Authenticate: Basic realm=\"tinysocks stats\"\r\n\
-          Content-Length: 0\r\n\
-          Connection: close\r\n\r\n",
-        "HTTP stats 401 response write",
-    )
-    .await?;
-    Ok(())
-}
-
-/// Send the rendered statistics page.
-async fn serve_stats_page(stream: &mut PrefixedStream, stats: &Stats) -> Result<()> {
-    let body = stats.render_html();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\n\
-         Content-Type: text/html; charset=utf-8\r\n\
-         Cache-Control: no-store\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    write_all_with_timeout(stream, response.as_bytes(), "HTTP stats page write").await?;
-    Ok(())
-}
-
-/// Send an HTTP proxy authentication challenge.
-async fn send_proxy_auth_required(stream: &mut PrefixedStream) -> Result<()> {
-    write_all_with_timeout(
-        stream,
-        b"HTTP/1.1 407 Proxy Authentication Required\r\n\
-          Proxy-Authenticate: Basic realm=\"proxy\"\r\n\
-          Content-Length: 0\r\n\
-          Connection: close\r\n\r\n",
-        "HTTP 407 response write",
-    )
-    .await?;
-    Ok(())
-}
-
-/// Handle an HTTP CONNECT tunnel request.
-async fn handle_connect(
-    stream: &mut PrefixedStream,
-    req: &HttpRequest,
-    copy_buf_size: usize,
-    stats: &Stats,
-    peer: std::net::SocketAddr,
-) -> Result<()> {
-    let (host, port) = parse_connect_target(&req.target)?;
-    let target = format_target_endpoint(&host, port);
-    let mut outbound = TcpStream::connect(&target)
-        .await
-        .inspect_err(|err| {
-            stats.inc_connect_failures();
-            stats.record_error(format!("HTTP CONNECT {target} failed from {peer}: {err}"));
-        })
-        .context("HttpError::ConnectFailed")?;
-    let _ = outbound.set_nodelay(true);
-
-    write_all_with_timeout(
-        stream,
-        b"HTTP/1.1 200 Connection Established\r\n\r\n",
-        "HTTP CONNECT response write",
-    )
-    .await?;
-
-    // Forward any bytes that arrived after the CONNECT header (e.g. TLS
-    // ClientHello) before entering the tunnel.
-    if !req.body_start.is_empty() {
-        write_all_with_timeout(
-            &mut outbound,
-            &req.body_start,
-            "HTTP CONNECT upstream pre-write",
-        )
-        .await?;
-        stats.add_tcp_bytes(req.body_start.len() as u64, 0);
-    }
-
-    let (up, down) =
-        copy_bidirectional_with_sizes(stream, &mut outbound, copy_buf_size, copy_buf_size)
-            .await
-            .inspect_err(|err| {
-                stats.inc_relay_failures();
-                stats.record_error(format!(
-                    "HTTP CONNECT relay {target} failed from {peer}: {err}"
-                ));
-            })
-            .context("HttpError::RelayFailed")?;
-    stats.add_tcp_bytes(up, down);
-    Ok(())
-}
-
-/// Forward a non-CONNECT HTTP proxy request.
-async fn handle_forward(
-    stream: &mut PrefixedStream,
-    req: &mut HttpRequest,
-    copy_buf_size: usize,
-    stats: &Stats,
-    peer: std::net::SocketAddr,
-    via: &str,
-) -> Result<()> {
-    let host_header = get_header(&req.headers, "host").map(|s| s.to_string());
-    let (host, port, path) = split_target(&req.target, host_header.as_deref(), 80)?;
-
-    let target = format_target_endpoint(&host, port);
-    let mut outbound = TcpStream::connect(&target)
-        .await
-        .inspect_err(|err| {
-            stats.inc_connect_failures();
-            stats.record_error(format!(
-                "HTTP forward connect {target} failed from {peer}: {err}"
-            ));
-        })
-        .context("HttpError::ConnectFailed")?;
-    let _ = outbound.set_nodelay(true);
-
-    let mut request = format!("{} {} {}\r\n", req.method, path, req.version);
-
-    // Drop hop-by-hop and proxy-only headers. Always replace the Host
-    // header with the target derived from the request URL to prevent
-    // Host header injection (RFC 7230 §5.4).
-    let connection_headers = connection_header_names(&req.headers);
-    for (name, value) in &req.headers {
-        if should_drop_forward_header(name, &connection_headers) {
-            continue;
-        }
-        request.push_str(name);
-        request.push_str(": ");
-        request.push_str(value);
-        request.push_str("\r\n");
-    }
-
-    let host_header = format_host_header(&host, port, 80);
-    request.push_str("Host: ");
-    request.push_str(&host_header);
-    request.push_str("\r\n");
-
-    // 回环检测依赖中间代理保留 Via，经过删除此头的代理时再增加目标地址拦截。
-    request.push_str(&format!("Via: {} {via}\r\n", req.version));
-    request.push_str("\r\n");
-
-    let initial_up = request.len() as u64 + req.body_start.len() as u64;
-
-    write_all_with_timeout(
-        &mut outbound,
-        request.as_bytes(),
-        "HTTP upstream request write",
-    )
-    .await?;
-    if !req.body_start.is_empty() {
-        write_all_with_timeout(&mut outbound, &req.body_start, "HTTP upstream body write").await?;
-    }
-    flush_with_timeout(&mut outbound, "HTTP upstream flush").await?;
-    stats.add_tcp_bytes(initial_up, 0);
-
-    let (up, down) =
-        copy_bidirectional_with_sizes(stream, &mut outbound, copy_buf_size, copy_buf_size)
-            .await
-            .inspect_err(|err| {
-                stats.inc_relay_failures();
-                stats.record_error(format!(
-                    "HTTP forward relay {target} failed from {peer}: {err}"
-                ));
-            })
-            .context("HttpError::RelayFailed")?;
-    stats.add_tcp_bytes(up, down);
-
-    Ok(())
-}
-
 /// Return header names listed by all Connection headers.
-fn connection_header_names(headers: &[(String, String)]) -> Vec<String> {
+fn connection_header_names<'a>(headers: impl Iterator<Item = (&'a str, &'a str)>) -> Vec<String> {
     headers
-        .iter()
         .filter(|(name, _)| name.eq_ignore_ascii_case("connection"))
         .flat_map(|(_, value)| value.split(','))
         .map(str::trim)
@@ -554,6 +529,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stripping_hop_headers_preserves_non_ascii_response_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-origin", HeaderValue::from_bytes(b"\xff").unwrap());
+        headers.insert("connection", HeaderValue::from_static("x-hop"));
+        headers.insert("x-hop", HeaderValue::from_static("remove"));
+        headers.insert("proxy-authorization", HeaderValue::from_static("secret"));
+
+        strip_forward_headers(&mut headers);
+
+        assert_eq!(headers["x-origin"].as_bytes(), b"\xff");
+        assert!(!headers.contains_key("connection"));
+        assert!(!headers.contains_key("x-hop"));
+        assert!(!headers.contains_key("proxy-authorization"));
+    }
+
+    #[test]
     fn proxy_via_detects_own_hop_in_multiple_headers_and_hop_lists() {
         let headers = vec![
             ("Via".to_string(), "1.0 other-proxy".to_string()),
@@ -571,9 +562,7 @@ mod tests {
         HttpRequest {
             method: method.to_string(),
             target: target.to_string(),
-            version: "HTTP/1.1".to_string(),
             headers: vec![("Host".to_string(), host.to_string())],
-            body_start: Vec::new(),
         }
     }
 
@@ -650,13 +639,17 @@ mod tests {
 
     #[test]
     fn connection_header_names_collects_extensions() {
-        let headers = vec![
+        let headers = [
             ("Connection".to_string(), "Keep-Alive, X-Hop".to_string()),
             ("connection".to_string(), "Another-Hop".to_string()),
         ];
 
         assert_eq!(
-            connection_header_names(&headers),
+            connection_header_names(
+                headers
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.as_str()))
+            ),
             vec!["keep-alive", "x-hop", "another-hop"]
         );
     }
@@ -727,9 +720,7 @@ mod tests {
         let req = HttpRequest {
             method: "GET".to_string(),
             target: "/stats".to_string(),
-            version: "HTTP/1.1".to_string(),
             headers: Vec::new(),
-            body_start: Vec::new(),
         };
         assert!(!is_stats_request(&req, 1080));
     }

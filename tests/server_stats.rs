@@ -18,6 +18,7 @@ impl Drop for ProxyProcess {
 async fn request(port: u16, message: &str) -> String {
     timeout(Duration::from_secs(2), async {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let message = message.replacen("\r\n\r\n", "\r\nConnection: close\r\n\r\n", 1);
         stream.write_all(message.as_bytes()).await.unwrap();
         let mut response = String::new();
         stream.read_to_string(&mut response).await.unwrap();
@@ -144,9 +145,9 @@ async fn stats_toggle_preserves_authentication_and_proxy_forwarding() {
                 headers.push(byte);
             }
             assert!(headers.starts_with(b"GET /stats HTTP/1.1\r\n"));
-            let headers = String::from_utf8(headers).unwrap();
-            assert!(headers.contains("Via: 1.0 other-proxy\r\n"));
-            assert!(headers.contains("Via: HTTP/1.1 tinysocks-"));
+            let headers = String::from_utf8(headers).unwrap().to_ascii_lowercase();
+            assert!(headers.contains("via: 1.0 other-proxy\r\n"));
+            assert!(headers.contains("via: http/1.1 tinysocks-"));
             stream
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nupstream",
