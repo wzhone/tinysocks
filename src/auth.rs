@@ -28,19 +28,14 @@ where
         bail!("SocksError::InvalidProtocol");
     }
 
-    let username = read_string(stream).await?;
-    let password = read_string(stream).await?;
+    let username = read_bytes(stream).await?;
+    let password = read_bytes(stream).await?;
     let (expected_user, expected_pass) = match (&auth.username, &auth.password) {
         (Some(username), Some(password)) => (username.as_bytes(), password.as_bytes()),
         _ => bail!("SocksError::AuthUnavailable"),
     };
 
-    if credentials_match(
-        expected_user,
-        expected_pass,
-        username.as_bytes(),
-        password.as_bytes(),
-    ) {
+    if credentials_match(expected_user, expected_pass, &username, &password) {
         write_all_with_timeout(stream, &[0x01, 0x00], "SOCKS auth success reply write").await?;
         return Ok(());
     }
@@ -92,8 +87,8 @@ pub fn http_basic_authorized(auth_header: Option<&str>, auth: &AuthConfig) -> bo
     credentials_match(expected_user, expected_pass, user_part, pass_part)
 }
 
-/// Read a length-prefixed SOCKS authentication string.
-async fn read_string<S>(stream: &mut S) -> Result<String>
+/// Read a length-prefixed SOCKS authentication field without changing its bytes.
+async fn read_bytes<S>(stream: &mut S) -> Result<Vec<u8>>
 where
     S: AsyncRead + Unpin,
 {
@@ -103,7 +98,7 @@ where
     let mut buf = vec![0u8; len[0] as usize];
     read_exact_with_timeout(stream, &mut buf, "SOCKS auth string body read").await?;
 
-    Ok(String::from_utf8_lossy(&buf).into_owned())
+    Ok(buf)
 }
 
 /// Check whether an IP address is allowed to bypass authentication.
