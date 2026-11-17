@@ -114,7 +114,7 @@ Local access without credentials:
 
 Open `http://<proxy-host>:<proxy-port>/stats` for connection and traffic statistics. Clients outside the allowlist log in with the proxy credentials.
 
-Disable statistics (currently requires a source build):
+Disable statistics:
 
 ```bash
 ./tinysocks 127.0.0.1:1080 --username admin --password 'change-me' --disable-stats

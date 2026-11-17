@@ -40,7 +40,35 @@ pub(crate) fn run_as_service(_options: RuntimeOptions) -> Result<()> {
 pub(crate) async fn run_foreground(runtime_options: RuntimeOptions) -> Result<()> {
     let cfg = Config::from_runtime_options(runtime_options)?;
     let server = ProxyServer::new(cfg)?;
+
+    #[cfg(unix)]
+    {
+        let shutdown = shutdown_signal()?;
+        tokio::select! {
+            result = server.run(None) => result,
+            () = shutdown => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
     server.run(None).await
+}
+
+#[cfg(unix)]
+fn shutdown_signal() -> Result<impl std::future::Future<Output = ()>> {
+    use anyhow::Context;
+    use tokio::signal::unix::{SignalKind, signal};
+
+    // 监听前注册信号，避免容器 PID 1 忽略 SIGTERM 后被 Docker 超时强杀。
+    let mut terminate =
+        signal(SignalKind::terminate()).context("Failed to register SIGTERM handler")?;
+    let mut interrupt =
+        signal(SignalKind::interrupt()).context("Failed to register SIGINT handler")?;
+    Ok(async move {
+        tokio::select! {
+            _ = terminate.recv() => {},
+            _ = interrupt.recv() => {},
+        }
+    })
 }
 
 #[cfg(any(windows, test))]

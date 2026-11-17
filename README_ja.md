@@ -114,7 +114,7 @@ Docker で SOCKS5 UDP ASSOCIATE を使う場合は `-p 1080:1080` を `--network
 
 `http://<proxy-host>:<proxy-port>/stats` で接続数とトラフィック統計を確認できます。許可リスト外のクライアントはプロキシの認証情報でログインします。
 
-統計を無効にする場合（現在はソースビルドが必要）：
+統計を無効にする場合：
 
 ```bash
 ./tinysocks 127.0.0.1:1080 --username admin --password 'change-me' --disable-stats

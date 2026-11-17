@@ -253,9 +253,6 @@ pub fn parse_udp_datagram(packet: &[u8]) -> Result<Option<UdpDatagram<'_>>> {
         bail!("SocksError::InvalidUdpPacket");
     }
 
-    // SOCKS5 UDP fragmentation is intentionally not implemented. Dropping
-    // fragmented datagrams is safer than forwarding payload bytes without
-    // reassembly semantics.
     if packet[2] != 0 {
         return Ok(None);
     }

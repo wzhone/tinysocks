@@ -164,7 +164,7 @@ pub(crate) fn uninstall() -> Result<()> {
     Ok(())
 }
 
-/// Remove installed service files when possible.
+/// Remove installed service files.
 fn remove_install_files(installed_exe: &Path, installed_dir: Option<&Path>) -> Result<()> {
     use std::fs;
 

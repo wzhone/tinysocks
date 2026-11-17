@@ -74,7 +74,7 @@ impl Default for StatsInner {
     }
 }
 
-/// Point-in-time snapshot of all counters (not atomically consistent).
+/// Snapshot of all counters.
 #[derive(Debug, Clone, Default)]
 pub struct StatsSnapshot {
     pub uptime_seconds: u64,

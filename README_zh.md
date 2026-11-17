@@ -112,7 +112,7 @@ Docker 使用 SOCKS5 UDP ASSOCIATE 时，将 `-p 1080:1080` 替换为 `--network
 
 访问 `http://<proxy-host>:<proxy-port>/stats` 查看连接和流量统计。非白名单客户端使用代理凭据登录。
 
-关闭统计（当前需源码构建）：
+关闭统计：
 
 ```bash
 ./tinysocks 127.0.0.1:1080 --username admin --password 'change-me' --disable-stats
