@@ -24,7 +24,7 @@ docker run -d --name tinysocks --restart unless-stopped \
 
 - Single-port SOCKS5 and HTTP proxy
 - HTTP forwarding, HTTP CONNECT, and SOCKS5 CONNECT
-- SOCKS5 UDP ASSOCIATE
+- Optional SOCKS5 UDP ASSOCIATE (disabled by default)
 - IPv4 / IPv6
 - Username/password authentication and IP/CIDR allowlists
 - Built-in `/stats` page
@@ -92,7 +92,7 @@ tinysocks [OPTIONS] [BIND ADDR] [COMMAND]
 
 The container listens on `0.0.0.0:1080`. Use environment variables or CLI arguments after the image name.
 
-For SOCKS5 UDP ASSOCIATE in Docker, replace `-p 1080:1080` with `--network host`.
+For SOCKS5 UDP ASSOCIATE in Docker, add `-e PROXY_ENABLE_UDP=true` and replace `-p 1080:1080` with `--network host`.
 
 ### Binary
 
@@ -132,10 +132,13 @@ Or set `PROXY_DISABLE_STATS=true`. For service installation, put `--disable-stat
 | `-p, --password <PASSWORD>` | `PROXY_PASSWORD` | - | Proxy password |
 | `--bypass-ip <IP_OR_CIDR>` | `PROXY_BYPASS_IP` | - | IPs / CIDRs exempt from authentication; comma-separated, pass once |
 | `--disable-stats` | `PROXY_DISABLE_STATS` | `false` | Disable statistics |
+| `--enable-udp` | `PROXY_ENABLE_UDP` | `false` | Enable SOCKS5 UDP ASSOCIATE |
 | `-h, --help` | - | - | Print command help |
 | `-V, --version` | - | - | Print the program version |
 
 CLI arguments override environment variables. Configure a username and password, or `--bypass-ip`.
+
+UDP is disabled by default. After authentication, UDP ASSOCIATE requests receive reply `0x07` unless `PROXY_ENABLE_UDP=true` or `--enable-udp` is set. Existing UDP deployments must explicitly enable it after upgrading. For service installation, put `--enable-udp` before `install`.
 
 When upgrading from a version using `TINYSOCKS_` runtime variables, rename them to `PROXY_` in deployment configuration and `/etc/tinysocks/tinysocks.env`; the old names are no longer read.
 

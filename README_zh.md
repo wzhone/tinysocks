@@ -24,7 +24,7 @@ docker run -d --name tinysocks --restart unless-stopped \
 
 - 单端口同时支持 SOCKS5 和 HTTP 代理
 - 支持 HTTP 转发、HTTP CONNECT 和 SOCKS5 CONNECT
-- 支持 SOCKS5 UDP ASSOCIATE
+- 可选 SOCKS5 UDP ASSOCIATE，默认关闭
 - 支持 IPv4 / IPv6
 - 支持用户名/密码认证和 IP/CIDR 白名单
 - 内置 `/stats` 统计页面
@@ -90,7 +90,7 @@ tinysocks [OPTIONS] [BIND ADDR] [COMMAND]
 
 容器监听 `0.0.0.0:1080`，支持环境变量和镜像名后的 CLI 参数。
 
-Docker 使用 SOCKS5 UDP ASSOCIATE 时，将 `-p 1080:1080` 替换为 `--network host`。
+Docker 使用 SOCKS5 UDP ASSOCIATE 时，添加 `-e PROXY_ENABLE_UDP=true`，并将 `-p 1080:1080` 替换为 `--network host`。
 
 ### 二进制
 
@@ -130,10 +130,13 @@ Docker 使用 SOCKS5 UDP ASSOCIATE 时，将 `-p 1080:1080` 替换为 `--network
 | `-p, --password <PASSWORD>` | `PROXY_PASSWORD` | - | 代理密码 |
 | `--bypass-ip <IP_OR_CIDR>` | `PROXY_BYPASS_IP` | - | 免认证 IP / CIDR，逗号分隔，只能传一次 |
 | `--disable-stats` | `PROXY_DISABLE_STATS` | `false` | 关闭统计 |
+| `--enable-udp` | `PROXY_ENABLE_UDP` | `false` | 开启 SOCKS5 UDP ASSOCIATE |
 | `-h, --help` | - | - | 显示命令帮助 |
 | `-V, --version` | - | - | 显示程序版本 |
 
 CLI 参数优先于环境变量。必须配置用户名和密码，或 `--bypass-ip`。
+
+UDP 默认关闭。认证后收到 UDP ASSOCIATE 请求时，返回 `0x07`；设置 `PROXY_ENABLE_UDP=true` 或传入 `--enable-udp` 后开启。原来使用 UDP 的部署升级后需要显式开启。安装服务时，将 `--enable-udp` 放在 `install` 前。
 
 从使用 `TINYSOCKS_` 运行变量的版本升级时，请将部署配置及 `/etc/tinysocks/tinysocks.env` 中的变量前缀改为 `PROXY_`；旧名称不再读取。
 

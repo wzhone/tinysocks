@@ -71,11 +71,9 @@ fn shutdown_signal() -> Result<impl std::future::Future<Output = ()>> {
     })
 }
 
-#[cfg(any(windows, test))]
-/// Build runtime CLI arguments from service options.
+#[cfg(any(target_os = "linux", windows, test))]
+/// Build shared, non-secret runtime CLI arguments for service installation.
 pub(crate) fn runtime_args(options: &RuntimeOptions) -> Result<Vec<String>> {
-    // Services store the full runtime CLI so install-time behavior matches the
-    // process that starts after boot.
     Config::from_runtime_options(options.clone())?;
 
     let mut args = vec![
@@ -83,18 +81,15 @@ pub(crate) fn runtime_args(options: &RuntimeOptions) -> Result<Vec<String>> {
         "--max-connections".to_string(),
         options.max_connections.to_string(),
     ];
-    if let (Some(username), Some(password)) = (&options.username, &options.password) {
-        args.push("--username".to_string());
-        args.push(username.clone());
-        args.push("--password".to_string());
-        args.push(password.clone());
-    }
     if !options.bypass_ips.is_empty() {
         args.push("--bypass-ip".to_string());
         args.push(options.bypass_ips.join(","));
     }
     if options.disable_stats {
         args.push("--disable-stats".to_string());
+    }
+    if options.enable_udp {
+        args.push("--enable-udp".to_string());
     }
     Ok(args)
 }
@@ -104,6 +99,12 @@ pub(crate) fn runtime_args(options: &RuntimeOptions) -> Result<Vec<String>> {
 pub(crate) fn windows_service_args(options: &RuntimeOptions) -> Result<Vec<String>> {
     let mut args = vec!["winsvc".to_string()];
     args.extend(runtime_args(options)?);
+    if let (Some(username), Some(password)) = (&options.username, &options.password) {
+        args.push("--username".to_string());
+        args.push(username.clone());
+        args.push("--password".to_string());
+        args.push(password.clone());
+    }
     Ok(args)
 }
 
@@ -116,9 +117,18 @@ mod tests {
             bind: "0.0.0.0:1080".to_string(),
             max_connections: 2048,
             disable_stats: false,
+            enable_udp: false,
             username: Some("admin".to_string()),
             password: Some("secret".to_string()),
             bypass_ips: vec!["127.0.0.0/8".to_string(), "::1/128".to_string()],
+        }
+    }
+
+    #[test]
+    fn shared_runtime_args_exclude_credentials() {
+        let args = runtime_args(&sample_options()).expect("should build args");
+        for secret in ["--username", "--password", "admin", "secret"] {
+            assert!(!args.iter().any(|arg| arg == secret));
         }
     }
 
@@ -133,21 +143,23 @@ mod tests {
                 "0.0.0.0:1080",
                 "--max-connections",
                 "2048",
+                "--bypass-ip",
+                "127.0.0.0/8,::1/128",
                 "--username",
                 "admin",
                 "--password",
                 "secret",
-                "--bypass-ip",
-                "127.0.0.0/8,::1/128",
             ]
         );
     }
 
     #[test]
-    fn windows_service_args_preserve_disabled_stats() {
+    fn windows_service_args_preserve_feature_flags() {
         let mut options = sample_options();
         options.disable_stats = true;
+        options.enable_udp = true;
         let args = windows_service_args(&options).expect("should build args");
-        assert_eq!(args.last().map(String::as_str), Some("--disable-stats"));
+        assert!(args.iter().any(|arg| arg == "--disable-stats"));
+        assert!(args.iter().any(|arg| arg == "--enable-udp"));
     }
 }

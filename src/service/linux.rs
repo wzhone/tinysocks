@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use tinysocks::config::{Config, RuntimeOptions};
 
-use super::SERVICE_DESCRIPTION;
+use super::{SERVICE_DESCRIPTION, runtime_args};
 
 const LINUX_SERVICE_NAME: &str = "tinysocks";
 const DEFAULT_LINUX_BIN_DIR: &str = "/usr/local/bin";
@@ -74,25 +74,6 @@ fn build_env_file(options: &RuntimeOptions) -> Result<Option<String>> {
     )))
 }
 
-/// Build Linux service command arguments without credentials.
-fn linux_service_args(options: &RuntimeOptions) -> Result<Vec<String>> {
-    Config::from_runtime_options(options.clone())?;
-
-    let mut args = vec![
-        options.bind.clone(),
-        "--max-connections".to_string(),
-        options.max_connections.to_string(),
-    ];
-    if !options.bypass_ips.is_empty() {
-        args.push("--bypass-ip".to_string());
-        args.push(options.bypass_ips.join(","));
-    }
-    if options.disable_stats {
-        args.push("--disable-stats".to_string());
-    }
-    Ok(args)
-}
-
 /// Build the systemd unit file contents.
 fn build_unit(
     installed_bin: &Path,
@@ -105,7 +86,7 @@ fn build_unit(
 
     let mut command = vec![quote_arg(&installed_bin.display().to_string())];
     command.extend(
-        linux_service_args(options)?
+        runtime_args(options)?
             .into_iter()
             .map(|arg| quote_arg(&arg)),
     );
@@ -281,6 +262,7 @@ mod tests {
             bind: "0.0.0.0:1080".to_string(),
             max_connections: 2048,
             disable_stats: false,
+            enable_udp: false,
             username: Some("admin".to_string()),
             password: Some("secret".to_string()),
             bypass_ips: vec!["127.0.0.0/8".to_string(), "::1/128".to_string()],
@@ -309,16 +291,17 @@ mod tests {
     }
 
     #[test]
-    fn systemd_unit_preserves_disabled_stats() {
+    fn systemd_unit_preserves_feature_flags() {
         let mut options = sample_options();
         options.disable_stats = true;
+        options.enable_udp = true;
         let unit = build_unit(
             Path::new("/usr/local/bin/tinysocks"),
             Some(Path::new("/etc/tinysocks/tinysocks.env")),
             &options,
         )
         .expect("should build unit");
-        assert!(unit.contains("--disable-stats\n"));
+        assert!(unit.contains("--disable-stats --enable-udp\n"));
     }
 
     #[test]

@@ -24,7 +24,7 @@ docker run -d --name tinysocks --restart unless-stopped \
 
 - 単一ポートで SOCKS5 と HTTP プロキシをサポート
 - HTTP 転送、HTTP CONNECT、SOCKS5 CONNECT
-- SOCKS5 UDP ASSOCIATE
+- SOCKS5 UDP ASSOCIATE（任意、デフォルト無効）
 - IPv4 / IPv6
 - ユーザー名/パスワード認証と IP/CIDR 許可リスト
 - 組み込みの `/stats` ページ
@@ -92,7 +92,7 @@ tinysocks [OPTIONS] [BIND ADDR] [COMMAND]
 
 コンテナは `0.0.0.0:1080` で待ち受けます。環境変数、またはイメージ名の後の CLI 引数で設定します。
 
-Docker で SOCKS5 UDP ASSOCIATE を使う場合は `-p 1080:1080` を `--network host` に置き換えます。
+Docker で SOCKS5 UDP ASSOCIATE を使う場合は `-e PROXY_ENABLE_UDP=true` を追加し、`-p 1080:1080` を `--network host` に置き換えます。
 
 ### バイナリ
 
@@ -132,10 +132,13 @@ Docker で SOCKS5 UDP ASSOCIATE を使う場合は `-p 1080:1080` を `--network
 | `-p, --password <PASSWORD>` | `PROXY_PASSWORD` | - | プロキシパスワード |
 | `--bypass-ip <IP_OR_CIDR>` | `PROXY_BYPASS_IP` | - | 認証を省略する IP / CIDR、カンマ区切り、指定は 1 回 |
 | `--disable-stats` | `PROXY_DISABLE_STATS` | `false` | 統計を無効にする |
+| `--enable-udp` | `PROXY_ENABLE_UDP` | `false` | SOCKS5 UDP ASSOCIATE を有効にする |
 | `-h, --help` | - | - | コマンドヘルプを表示 |
 | `-V, --version` | - | - | プログラムのバージョンを表示 |
 
 CLI 引数は環境変数より優先されます。ユーザー名とパスワード、または `--bypass-ip` の設定が必要です。
+
+UDP はデフォルトで無効です。認証後の UDP ASSOCIATE 要求には `0x07` を返します。`PROXY_ENABLE_UDP=true` または `--enable-udp` で有効にできます。既存の UDP 利用環境では更新後に明示的な有効化が必要です。サービスのインストール時は `install` の前に `--enable-udp` を指定します。
 
 `TINYSOCKS_` の実行時変数を使うバージョンから更新する場合は、デプロイ設定と `/etc/tinysocks/tinysocks.env` の接頭辞を `PROXY_` に変更してください。旧名は読み込まれません。
 

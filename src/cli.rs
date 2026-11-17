@@ -40,6 +40,14 @@ pub struct Cli {
     disable_stats: bool,
 
     #[arg(
+        long,
+        global = true,
+        env = "PROXY_ENABLE_UDP",
+        help = "Enable SOCKS5 UDP ASSOCIATE"
+    )]
+    enable_udp: bool,
+
+    #[arg(
         short,
         long,
         global = true,
@@ -78,6 +86,7 @@ impl Cli {
             bind: self.bind.clone(),
             max_connections: self.max_connections,
             disable_stats: self.disable_stats,
+            enable_udp: self.enable_udp,
             username: self.username.clone(),
             password: self.password.clone(),
             bypass_ips: self.bypass_ips.clone(),
@@ -147,6 +156,7 @@ mod tests {
         let options = cli.runtime_options();
         assert_eq!(options.bind, "127.0.0.1:2080");
         assert!(!options.disable_stats);
+        assert!(!options.enable_udp);
         assert!(cli.command.is_none());
     }
 
@@ -160,6 +170,7 @@ mod tests {
             "--password",
             "secret",
             "--disable-stats",
+            "--enable-udp",
             "install",
         ])
         .expect("should parse CLI");
@@ -167,6 +178,7 @@ mod tests {
         let options = cli.runtime_options();
         assert_eq!(options.bind, "127.0.0.1:2081");
         assert!(options.disable_stats);
+        assert!(options.enable_udp);
         assert!(matches!(cli.command, Some(Command::Install)));
     }
 

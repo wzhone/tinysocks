@@ -90,7 +90,7 @@ async fn reused_connections_route_authenticate_and_frame_each_request() {
 
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let server = ProxyServer::new(Config {
-            server: ServerConfig { bind: format!("127.0.0.1:{port}"), max_connections: 16, disable_stats: false },
+            server: ServerConfig { bind: format!("127.0.0.1:{port}"), max_connections: 16, disable_stats: false, enable_udp: false },
             auth: AuthConfig { username: Some("user".into()), password: Some("pass".into()), bypass_ips: Vec::new() },
         }).unwrap();
         let (stop, shutdown) = watch::channel(false);

@@ -13,6 +13,7 @@ pub struct ServerConfig {
     pub bind: String,
     pub max_connections: usize,
     pub disable_stats: bool,
+    pub enable_udp: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +34,7 @@ pub struct RuntimeOptions {
     pub bind: String,
     pub max_connections: usize,
     pub disable_stats: bool,
+    pub enable_udp: bool,
     pub username: Option<String>,
     pub password: Option<String>,
     pub bypass_ips: Vec<String>,
@@ -50,6 +52,7 @@ impl Config {
                 bind: options.bind,
                 max_connections: options.max_connections,
                 disable_stats: options.disable_stats,
+                enable_udp: options.enable_udp,
             },
             auth: AuthConfig {
                 username,

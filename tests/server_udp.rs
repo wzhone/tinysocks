@@ -14,7 +14,7 @@ use tinysocks::{
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn socks_udp_associate_relays_datagrams_and_locks_client_source() {
+async fn socks_udp_associate_respects_enable_udp_and_locks_client_source() {
     let echo = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo.local_addr().unwrap();
     let echo_task = tokio::spawn(async move {
@@ -27,62 +27,106 @@ async fn socks_udp_associate_relays_datagrams_and_locks_client_source() {
         }
     });
 
-    let proxy_port = reserve_local_port();
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let server = ProxyServer::new(Config {
-        server: ServerConfig {
-            bind: format!("127.0.0.1:{proxy_port}"),
-            max_connections: 1024,
-            disable_stats: true,
-        },
-        auth: AuthConfig {
-            username: Some("user".to_string()),
-            password: Some("pass".to_string()),
-            bypass_ips: vec!["127.0.0.0/8".parse().unwrap()],
-        },
-    })
-    .unwrap();
-
-    let server_task = tokio::spawn(async move { server.run(Some(shutdown_rx)).await });
-    wait_for_tcp(proxy_port).await;
-
-    let mut control = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
-    control.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
-
-    let mut method = [0u8; 2];
-    control.read_exact(&mut method).await.unwrap();
-    assert_eq!(method, [0x05, 0x00]);
-
-    control
-        .write_all(&[0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
-        .await
+    for enable_udp in [false, true] {
+        let proxy_port = reserve_local_port();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = ProxyServer::new(Config {
+            server: ServerConfig {
+                bind: format!("127.0.0.1:{proxy_port}"),
+                max_connections: 1024,
+                disable_stats: true,
+                enable_udp,
+            },
+            auth: AuthConfig {
+                username: Some("user".to_string()),
+                password: Some("pass".to_string()),
+                bypass_ips: Vec::new(),
+            },
+        })
         .unwrap();
-    let relay_addr = read_socks_success_reply(&mut control).await;
 
-    let client_udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let request = encode_udp_datagram(&Address::from_socket_addr(echo_addr), b"ping").unwrap();
-    client_udp.send_to(&request, relay_addr).await.unwrap();
+        let server_task = tokio::spawn(async move { server.run(Some(shutdown_rx)).await });
+        wait_for_tcp(proxy_port).await;
 
-    let mut buf = [0u8; 2048];
-    let (len, _) = timeout(Duration::from_secs(2), client_udp.recv_from(&mut buf))
-        .await
-        .unwrap()
-        .unwrap();
-    let response = parse_udp_datagram(&buf[..len]).unwrap().unwrap();
-    assert_eq!(response.destination, Address::from_socket_addr(echo_addr));
-    assert_eq!(response.payload, b"ping");
+        // UDP 开关不能改变认证要求，认证失败必须在命令处理前结束。
+        for (request, expected) in [
+            (b"\x05\x01\x00".as_slice(), b"\x05\xff".as_slice()),
+            (
+                b"\x05\x01\x02\x01\x04user\x04fail".as_slice(),
+                b"\x05\x02\x01\x01".as_slice(),
+            ),
+        ] {
+            let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
+            client.write_all(request).await.unwrap();
+            let mut reply = vec![0; expected.len()];
+            timeout(Duration::from_secs(2), client.read_exact(&mut reply))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(reply, expected);
+        }
 
-    let intruder_udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    intruder_udp.send_to(&request, relay_addr).await.unwrap();
+        let mut control = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
+        control.write_all(&[0x05, 0x01, 0x02]).await.unwrap();
 
-    assert!(
-        timeout(Duration::from_millis(300), intruder_udp.recv_from(&mut buf))
+        let mut method = [0u8; 2];
+        control.read_exact(&mut method).await.unwrap();
+        assert_eq!(method, [0x05, 0x02]);
+
+        control.write_all(b"\x01\x04user\x04pass").await.unwrap();
+        control.read_exact(&mut method).await.unwrap();
+        assert_eq!(method, [0x01, 0x00]);
+
+        control
+            .write_all(&[0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
             .await
-            .is_err()
-    );
+            .unwrap();
+        if !enable_udp {
+            let mut reply = [0u8; 10];
+            control.read_exact(&mut reply).await.unwrap();
+            assert_eq!(&reply[..4], &[0x05, 0x07, 0x00, 0x01]);
+            assert_eq!(
+                timeout(Duration::from_secs(2), control.read(&mut reply))
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                0
+            );
+            shutdown_tx.send(true).unwrap();
+            timeout(Duration::from_secs(2), server_task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            continue;
+        }
+        let relay_addr = read_socks_success_reply(&mut control).await;
 
-    let _ = shutdown_tx.send(true);
-    let _ = timeout(Duration::from_secs(2), server_task).await.unwrap();
+        let client_udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let request = encode_udp_datagram(&Address::from_socket_addr(echo_addr), b"ping").unwrap();
+        client_udp.send_to(&request, relay_addr).await.unwrap();
+
+        let mut buf = [0u8; 2048];
+        let (len, _) = timeout(Duration::from_secs(2), client_udp.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        let response = parse_udp_datagram(&buf[..len]).unwrap().unwrap();
+        assert_eq!(response.destination, Address::from_socket_addr(echo_addr));
+        assert_eq!(response.payload, b"ping");
+
+        let intruder_udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        intruder_udp.send_to(&request, relay_addr).await.unwrap();
+
+        assert!(
+            timeout(Duration::from_millis(300), intruder_udp.recv_from(&mut buf))
+                .await
+                .is_err()
+        );
+
+        let _ = shutdown_tx.send(true);
+        let _ = timeout(Duration::from_secs(2), server_task).await.unwrap();
+    }
     echo_task.abort();
 }
 

@@ -1,4 +1,4 @@
-//! Relay handlers for SOCKS5 TCP CONNECT and UDP ASSOCIATE.
+//! SOCKS5 authentication, command dispatch, and TCP/UDP relays.
 //!
 //! The UDP relay is scoped to the lifetime of the TCP control connection, as
 //! required by SOCKS5 clients and useful for cleanup.
@@ -12,7 +12,12 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, copy_bidirectional_with_siz
 use tokio::net::{TcpStream, UdpSocket};
 
 use crate::{
-    protocol::{Address, encode_udp_datagram, parse_udp_datagram, send_reply},
+    auth::basic_authenticate,
+    config::AuthConfig,
+    protocol::{
+        Address, AuthMethod, Command, PrefixedStream, encode_udp_datagram, handshake,
+        parse_udp_datagram, read_request, send_reply,
+    },
     stats::Stats,
 };
 
@@ -20,8 +25,53 @@ const TCP_COPY_BUFFER: usize = 64 * 1024;
 const UDP_BUFFER_SIZE: usize = 65_535;
 const MAX_UDP_REMOTE_ENDPOINTS: usize = 1024;
 
+/// Authenticate and serve one SOCKS5 connection.
+pub async fn handle_socks_proxy(
+    mut stream: PrefixedStream,
+    bypass_auth: bool,
+    auth: &AuthConfig,
+    enable_udp: bool,
+    stats: &Stats,
+    peer: SocketAddr,
+) -> Result<()> {
+    let method = if bypass_auth {
+        AuthMethod::NoAuth
+    } else {
+        AuthMethod::UsernamePassword
+    };
+
+    if let Err(err) = handshake(&mut stream, method).await {
+        if !bypass_auth {
+            stats.inc_auth_failures();
+            stats.record_error(format!(
+                "SOCKS authentication negotiation failed from {peer}: {err}"
+            ));
+        }
+        return Err(err);
+    }
+
+    if !bypass_auth && let Err(err) = basic_authenticate(&mut stream, auth).await {
+        stats.inc_auth_failures();
+        stats.record_error(format!("SOCKS authentication failed from {peer}: {err}"));
+        return Err(err);
+    }
+
+    match read_request(&mut stream).await?.cmd {
+        Command::Connect(addr) => handle_connect(&mut stream, addr, stats, peer).await,
+        Command::UdpAssociate(addr) => {
+            let local_addr = stream.local_addr()?;
+            if !enable_udp {
+                let bound = Address::from_socket_addr(local_addr);
+                send_reply(&mut stream, 0x07, &bound).await?;
+                return Ok(());
+            }
+            handle_udp_associate(&mut stream, peer, local_addr.ip(), addr, stats).await
+        }
+    }
+}
+
 /// Handle a SOCKS5 TCP CONNECT request.
-pub async fn handle_connect<S>(
+async fn handle_connect<S>(
     inbound: &mut S,
     addr: Address,
     stats: &Stats,
@@ -60,7 +110,7 @@ where
 }
 
 /// Handle a SOCKS5 UDP ASSOCIATE request.
-pub async fn handle_udp_associate<S>(
+async fn handle_udp_associate<S>(
     control: &mut S,
     tcp_peer: SocketAddr,
     relay_bind_ip: IpAddr,

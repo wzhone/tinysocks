@@ -1,38 +1,40 @@
 //! Listener and connection dispatch.
 //!
 //! tinysocks serves SOCKS5 and HTTP proxy traffic on the same TCP port by
-//! peeking at the first byte and replaying it through `PrefixedStream`.
+//! reading the first byte and replaying it through `PrefixedStream`.
 
 use anyhow::{Context, Result};
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::{Semaphore, watch},
 };
 
 use crate::{
-    auth::{basic_authenticate, ip_authenticate},
+    auth::ip_authenticate,
     config::{AuthConfig, Config},
-    handler::{handle_connect, handle_udp_associate},
     http::{HttpListener, handle_http_proxy},
     io_timeout::read_with_timeout,
-    protocol::{AuthMethod, PrefixedStream, SOCKS_VERSION, handshake, read_request},
+    protocol::{PrefixedStream, SOCKS_VERSION},
+    socks::handle_socks_proxy,
     stats::Stats,
 };
-
-const COPY_BUFFER: usize = 64 * 1024;
 
 pub struct ProxyServer {
     bind: String,
     max_connections: usize,
+    enable_udp: bool,
     auth: AuthConfig,
     stats: Stats,
 }
 
-enum ProxyProtocol {
-    Socks5,
-    Http,
+struct ActiveGuard(Stats);
+
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        self.0.dec_active_connections();
+    }
 }
 
 impl ProxyServer {
@@ -48,6 +50,7 @@ impl ProxyServer {
         Ok(Self {
             bind: server.bind,
             max_connections: server.max_connections,
+            enable_udp: server.enable_udp,
             auth,
             stats: if server.disable_stats {
                 Stats::disabled()
@@ -57,10 +60,7 @@ impl ProxyServer {
         })
     }
 
-    async fn accept(
-        &self,
-        listener: &TcpListener,
-    ) -> (tokio::net::TcpStream, std::net::SocketAddr) {
+    async fn accept(&self, listener: &TcpListener) -> (TcpStream, SocketAddr) {
         loop {
             match listener.accept().await {
                 Ok(connection) => return connection,
@@ -109,116 +109,53 @@ impl ProxyServer {
             let auth_cfg = self.auth.clone();
             let stats = self.stats.clone();
             let http_listener = http_listener.clone();
+            let enable_udp = self.enable_udp;
 
             stats.inc_total_connections();
             stats.inc_active_connections();
 
             tokio::spawn(async move {
                 let _permit = permit;
-
-                // Decrement active connections on scope exit.
-                struct ActiveGuard(Stats);
-                impl Drop for ActiveGuard {
-                    // Update the active connection counter when the task exits.
-                    fn drop(&mut self) {
-                        self.0.dec_active_connections();
-                    }
-                }
                 let _guard = ActiveGuard(stats.clone());
 
-                let r = async {
-                    let peer_ip = peer.ip();
-                    let bypass_auth = ip_authenticate(&auth_cfg.bypass_ips, peer_ip);
-                    stream.set_nodelay(true)?;
-
-                    // SOCKS5 starts with version 0x05. HTTP methods start with
-                    // ASCII letters, so the first byte is enough to dispatch.
-                    let mut first = [0u8; 1];
-                    let read =
-                        read_with_timeout(&mut stream, &mut first, "initial protocol read").await?;
-                    if read == 0 {
-                        return Ok::<(), anyhow::Error>(());
-                    }
-
-                    let protocol = if first[0] == SOCKS_VERSION {
-                        stats.inc_socks5_connections();
-                        ProxyProtocol::Socks5
-                    } else {
-                        stats.inc_http_connections();
-                        ProxyProtocol::Http
-                    };
-                    let mut stream = PrefixedStream::new(stream, first[..read].to_vec());
-
-                    match protocol {
-                        ProxyProtocol::Socks5 => {
-                            let method = if bypass_auth {
-                                AuthMethod::NoAuth
-                            } else {
-                                AuthMethod::UsernamePassword
-                            };
-
-                            if let Err(err) = handshake(&mut stream, method).await {
-                                if !bypass_auth {
-                                    stats.inc_auth_failures();
-                                    stats.record_error(format!(
-                                        "SOCKS authentication negotiation failed from {peer}: {err}"
-                                    ));
-                                }
-                                return Err(err);
-                            }
-
-                            if !bypass_auth
-                                && let Err(err) = basic_authenticate(&mut stream, &auth_cfg).await
-                            {
-                                stats.inc_auth_failures();
-                                stats.record_error(format!(
-                                    "SOCKS authentication failed from {peer}: {err}"
-                                ));
-                                return Err(err);
-                            }
-                            let req = read_request(&mut stream).await?;
-
-                            match req.cmd {
-                                crate::protocol::Command::Connect(addr) => {
-                                    handle_connect(&mut stream, addr, &stats, peer).await?;
-                                }
-                                crate::protocol::Command::UdpAssociate(addr) => {
-                                    let relay_bind_ip = stream.local_addr()?.ip();
-                                    handle_udp_associate(
-                                        &mut stream,
-                                        peer,
-                                        relay_bind_ip,
-                                        addr,
-                                        &stats,
-                                    )
-                                    .await?;
-                                }
-                            }
-                        }
-                        ProxyProtocol::Http => {
-                            handle_http_proxy(
-                                stream,
-                                bypass_auth,
-                                &auth_cfg,
-                                COPY_BUFFER,
-                                &stats,
-                                &http_listener,
-                                peer,
-                            )
-                            .await?;
-                        }
-                    }
-                    Ok::<(), anyhow::Error>(())
-                }
-                .await;
-
-                if let Err(e) = r {
-                    println!("connection {} error: {}", peer, e);
+                if let Err(err) =
+                    handle_connection(stream, peer, &auth_cfg, enable_udp, &stats, &http_listener)
+                        .await
+                {
+                    println!("connection {peer} error: {err}");
                 }
             });
         }
 
         Ok(())
+    }
+}
+
+async fn handle_connection(
+    mut stream: TcpStream,
+    peer: SocketAddr,
+    auth: &AuthConfig,
+    enable_udp: bool,
+    stats: &Stats,
+    http_listener: &HttpListener,
+) -> Result<()> {
+    let bypass_auth = ip_authenticate(&auth.bypass_ips, peer.ip());
+    stream.set_nodelay(true)?;
+
+    // SOCKS5 以 0x05 开头，HTTP 方法以字母开头；消费的首字节交回协议处理器。
+    let mut first = [0u8; 1];
+    let read = read_with_timeout(&mut stream, &mut first, "initial protocol read").await?;
+    if read == 0 {
+        return Ok(());
+    }
+    let stream = PrefixedStream::new(stream, first[..read].to_vec());
+
+    if first[0] == SOCKS_VERSION {
+        stats.inc_socks5_connections();
+        handle_socks_proxy(stream, bypass_auth, auth, enable_udp, stats, peer).await
+    } else {
+        stats.inc_http_connections();
+        handle_http_proxy(stream, bypass_auth, auth, stats, http_listener, peer).await
     }
 }
 
@@ -233,6 +170,7 @@ mod tests {
                 bind: bind.to_string(),
                 max_connections: 16,
                 disable_stats: false,
+                enable_udp: false,
             },
             auth: AuthConfig {
                 username: Some("user".to_string()),

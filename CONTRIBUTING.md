@@ -16,6 +16,17 @@ cargo build --locked
 .github/scripts/e2e-curl.sh
 ```
 
+## Code Layout
+
+- `src/main.rs` and `src/cli.rs`: command dispatch and CLI/environment options.
+- `src/config.rs`: runtime configuration validation.
+- `src/server.rs`: connection admission, limits, and SOCKS5/HTTP dispatch.
+- `src/socks.rs`: SOCKS5 authentication, commands, and TCP/UDP relays.
+- `src/protocol.rs`: SOCKS5 message encoding/decoding and prefixed stream I/O.
+- `src/http.rs`: HTTP authentication, forwarding, CONNECT, and the stats route.
+- `src/auth.rs`, `src/io_timeout.rs`, and `src/stats.rs`: shared runtime helpers.
+- `src/service/`: foreground lifecycle, shared service arguments, and platform installers.
+
 ## Pull Requests
 
 - Keep changes focused and avoid unrelated refactors.

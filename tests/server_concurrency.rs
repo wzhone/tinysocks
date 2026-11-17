@@ -21,6 +21,7 @@ async fn max_connections_limits_concurrent_handling() {
             bind: format!("127.0.0.1:{proxy_port}"),
             max_connections: 1,
             disable_stats: true,
+            enable_udp: false,
         },
         auth: AuthConfig {
             username: Some("user".to_string()),

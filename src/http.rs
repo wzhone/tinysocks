@@ -33,6 +33,7 @@ use crate::{
 
 const MAX_HEADER_SIZE: usize = 64 * 1024;
 const MAX_HEADERS: usize = 128;
+const TCP_COPY_BUFFER: usize = 64 * 1024;
 type ProxyBody = BoxBody<Bytes, hyper::Error>;
 
 pub struct HttpListener {
@@ -55,7 +56,6 @@ pub async fn handle_http_proxy(
     stream: PrefixedStream,
     bypass_auth: bool,
     auth: &AuthConfig,
-    copy_buf_size: usize,
     stats: &Stats,
     listener: &HttpListener,
     peer: std::net::SocketAddr,
@@ -90,14 +90,18 @@ pub async fn handle_http_proxy(
         )
         .await?;
         stats.add_tcp_bytes(parts.read_buf.len() as u64, 0);
-        let (up, down) =
-            copy_bidirectional_with_sizes(&mut stream, &mut outbound, copy_buf_size, copy_buf_size)
-                .await
-                .inspect_err(|err| {
-                    stats.inc_relay_failures();
-                    stats.record_error(format!("HTTP CONNECT relay failed from {peer}: {err}"));
-                })
-                .context("HttpError::RelayFailed")?;
+        let (up, down) = copy_bidirectional_with_sizes(
+            &mut stream,
+            &mut outbound,
+            TCP_COPY_BUFFER,
+            TCP_COPY_BUFFER,
+        )
+        .await
+        .inspect_err(|err| {
+            stats.inc_relay_failures();
+            stats.record_error(format!("HTTP CONNECT relay failed from {peer}: {err}"));
+        })
+        .context("HttpError::RelayFailed")?;
         stats.add_tcp_bytes(up, down);
     }
     Ok(())
